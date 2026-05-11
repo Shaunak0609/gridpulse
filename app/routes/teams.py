@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.team import Team
+from app.schemas.team import TeamSchema
 
 router = APIRouter()
 
 
-@router.get("/teams")
+@router.get("/teams", response_model=list[TeamSchema])
 def get_teams(db: Session = Depends(get_db)):
     teams = db.query(Team).all()
     return [

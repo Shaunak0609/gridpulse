@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.race import Race
+from app.schemas.race import RaceSchema
 
 router = APIRouter()
 
 
-@router.get("/calendar")
+@router.get("/calendar", response_model=list[RaceSchema])
 def get_calendar(db: Session = Depends(get_db)):
     races = db.query(Race).order_by(Race.round).all()
     return [

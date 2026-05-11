@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.standing import DriverStanding
+from app.schemas.standing import DriverStandingSchema
 
 router = APIRouter()
 
 
-@router.get("/standings/drivers")
+@router.get("/standings/drivers", response_model=list[DriverStandingSchema])
 def get_driver_standings(db: Session = Depends(get_db)):
     standings = db.query(DriverStanding).order_by(DriverStanding.position).all()
     return [

@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.database.database import get_db
 from app.models.driver import Driver
+from app.schemas.driver import DriverSchema
 
 router = APIRouter()
 
 
-@router.get("/drivers")
+@router.get("/drivers", response_model=list[DriverSchema])
 def get_drivers(db: Session = Depends(get_db)):
     drivers = db.query(Driver).all()
     return [
@@ -23,12 +24,12 @@ def get_drivers(db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/drivers/{driver_id}")
+@router.get("/drivers/{driver_id}", response_model=DriverSchema)
 def get_driver(driver_id: int, db: Session = Depends(get_db)):
     driver = db.query(Driver).filter(Driver.id == driver_id).first()
 
     if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
+        raise HTTPException(status_code=404, detail=f"Driver with id {driver_id} not found")
 
     return {
         "id": driver.id,
