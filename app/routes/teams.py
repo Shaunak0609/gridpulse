@@ -1,15 +1,21 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.database.database import get_db
+from app.models.team import Team
 
 router = APIRouter()
 
-teams = [
-    {"id": 1, "name": "Red Bull Racing", "base": "Milton Keynes, UK", "team_principal": "Christian Horner"},
-    {"id": 2, "name": "McLaren",         "base": "Woking, UK",        "team_principal": "Andrea Stella"},
-    {"id": 3, "name": "Ferrari",         "base": "Maranello, Italy",  "team_principal": "Frederic Vasseur"},
-    {"id": 4, "name": "Mercedes",        "base": "Brackley, UK",      "team_principal": "Toto Wolff"},
-]
-
 
 @router.get("/teams")
-def get_teams():
-    return teams
+def get_teams(db: Session = Depends(get_db)):
+    teams = db.query(Team).all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "constructor_name": t.constructor_name,
+            "base": t.base,
+        }
+        for t in teams
+    ]

@@ -1,23 +1,40 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.database.database import get_db
+from app.models.driver import Driver
 
 router = APIRouter()
 
-drivers = [
-    {"id": 1, "code": "VER", "full_name": "Max Verstappen",  "team": "Red Bull Racing", "nationality": "Dutch",      "number": 1},
-    {"id": 2, "code": "NOR", "full_name": "Lando Norris",    "team": "McLaren",         "nationality": "British",    "number": 4},
-    {"id": 3, "code": "LEC", "full_name": "Charles Leclerc", "team": "Ferrari",         "nationality": "Monégasque", "number": 16},
-    {"id": 4, "code": "HAM", "full_name": "Lewis Hamilton",  "team": "Ferrari",         "nationality": "British",    "number": 44},
-]
-
 
 @router.get("/drivers")
-def get_drivers():
-    return drivers
+def get_drivers(db: Session = Depends(get_db)):
+    drivers = db.query(Driver).all()
+    return [
+        {
+            "id": d.id,
+            "code": d.code,
+            "full_name": d.full_name,
+            "nationality": d.nationality,
+            "driver_number": d.driver_number,
+            "team": d.team.name if d.team else None,
+        }
+        for d in drivers
+    ]
 
 
 @router.get("/drivers/{driver_id}")
-def get_driver(driver_id: int):
-    for driver in drivers:
-        if driver["id"] == driver_id:
-            return driver
-    raise HTTPException(status_code=404, detail="Driver not found")
+def get_driver(driver_id: int, db: Session = Depends(get_db)):
+    driver = db.query(Driver).filter(Driver.id == driver_id).first()
+
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    return {
+        "id": driver.id,
+        "code": driver.code,
+        "full_name": driver.full_name,
+        "nationality": driver.nationality,
+        "driver_number": driver.driver_number,
+        "team": driver.team.name if driver.team else None,
+    }

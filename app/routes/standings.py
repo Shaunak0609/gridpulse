@@ -1,15 +1,23 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.database.database import get_db
+from app.models.standing import DriverStanding
 
 router = APIRouter()
 
-standings = [
-    {"position": 1, "driver": "Max Verstappen",  "team": "Red Bull Racing", "points": 77, "wins": 3},
-    {"position": 2, "driver": "Lando Norris",    "team": "McLaren",         "points": 62, "wins": 1},
-    {"position": 3, "driver": "Charles Leclerc", "team": "Ferrari",         "points": 48, "wins": 0},
-    {"position": 4, "driver": "Lewis Hamilton",  "team": "Ferrari",         "points": 35, "wins": 0},
-]
-
 
 @router.get("/standings/drivers")
-def get_driver_standings():
-    return standings
+def get_driver_standings(db: Session = Depends(get_db)):
+    standings = db.query(DriverStanding).order_by(DriverStanding.position).all()
+    return [
+        {
+            "position": s.position,
+            "driver": s.driver.full_name,
+            "team": s.team.name,
+            "points": s.points,
+            "wins": s.wins,
+            "podiums": s.podiums,
+        }
+        for s in standings
+    ]
