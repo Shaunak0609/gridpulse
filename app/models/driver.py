@@ -8,6 +8,7 @@ class Driver(Base):
     __tablename__ = "drivers"
 
     id = Column(Integer, primary_key=True)
+    jolpica_ref = Column(String, unique=True, nullable=True)
     code = Column(String(3), nullable=False)
     full_name = Column(String, nullable=False)
     nationality = Column(String)

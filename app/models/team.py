@@ -8,6 +8,7 @@ class Team(Base):
     __tablename__ = "teams"
 
     id = Column(Integer, primary_key=True)
+    jolpica_ref = Column(String, unique=True, nullable=True)
     name = Column(String, nullable=False)
     constructor_name = Column(String, nullable=False)
     base = Column(String)
