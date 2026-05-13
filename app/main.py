@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import drivers, teams, calendar, standings
+from app.routes import drivers, teams, calendar, standings, auth
 
 app = FastAPI(title="GridPulse", description="F1 Race Intelligence Platform")
 
@@ -12,6 +12,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(drivers.router)
 app.include_router(teams.router)
 app.include_router(calendar.router)
