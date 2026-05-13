@@ -32,3 +32,27 @@ export interface DriverStanding {
   wins: number
   podiums: number
 }
+
+export interface AuthUser {
+  id: number
+  email: string
+  username: string | null
+  timezone: string | null
+}
+
+export interface SignupPayload {
+  email: string
+  password: string
+  username?: string
+  timezone?: string
+}
+
+export interface LoginPayload {
+  email: string
+  password: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+}
