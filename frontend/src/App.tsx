@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import Navbar from './components/Navbar'
+import ProtectedRoute from './components/ProtectedRoute'
 import Home from './pages/Home'
 import Drivers from './pages/Drivers'
 import DriverDetail from './pages/DriverDetail'
@@ -9,6 +10,7 @@ import Calendar from './pages/Calendar'
 import Standings from './pages/Standings'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import Profile from './pages/Profile'
 
 function App() {
   return (
@@ -25,6 +27,14 @@ function App() {
             <Route path="/standings" element={<Standings />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </main>
       </div>
