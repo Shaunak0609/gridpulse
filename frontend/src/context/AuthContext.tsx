@@ -13,6 +13,7 @@ interface AuthContextValue {
   isAuthenticated: boolean
   loading: boolean
   login: (payload: LoginPayload) => Promise<void>
+  loginWithToken: (token: string) => Promise<void>
   logout: () => void
 }
 
@@ -56,6 +57,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(fetchedUser)
   }
 
+  // Used after Google sign-in: the token arrives via URL, not from a form submit.
+  async function loginWithToken(token: string) {
+    const fetchedUser = await getCurrentUser(token)
+    localStorage.setItem(TOKEN_KEY, token)
+    setToken(token)
+    setUser(fetchedUser)
+  }
+
   function logout() {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
@@ -70,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: user !== null,
         loading,
         login,
+        loginWithToken,
         logout,
       }}
     >

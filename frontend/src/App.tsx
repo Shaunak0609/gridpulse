@@ -11,6 +11,7 @@ import Standings from './pages/Standings'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Profile from './pages/Profile'
+import GoogleCallback from './pages/GoogleCallback'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
             <Route path="/standings" element={<Standings />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/auth/google/callback" element={<GoogleCallback />} />
             <Route
               path="/profile"
               element={
