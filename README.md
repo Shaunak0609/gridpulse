@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 2
+## Current Status — Phase 4
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -23,9 +23,26 @@ This repository contains the backend API built with Python and FastAPI.
 - Data ingestion service that maps API responses to database models
 - Upsert logic — safe to sync multiple times without creating duplicates
 - Manual sync script to pull and store real 2025 F1 data
-- All 7 endpoints now serve real data from the database
+- All endpoints now serve real data from the database
 
-There is no frontend yet. All features are tested via the browser, curl, or the built-in API docs at `/docs`.
+### Phase 3 — Frontend Foundation + Multi-Page UI (complete)
+
+- Vite + React + TypeScript frontend in `frontend/`
+- Tailwind CSS v4 for styling
+- React Router v6 with multi-page navigation
+- Pages: Home, Drivers, Driver Detail, Teams, Calendar, Standings
+- Loading skeletons, error states, and page entrance animations
+- Frontend API service layer pointing at the FastAPI backend
+
+### Phase 4 — User Accounts and Local Authentication (complete)
+
+- `users` table with email, username, password hash, timezone, and created date
+- `POST /auth/signup` — create an account with a hashed password
+- `POST /auth/login` — verify credentials and receive a JWT access token
+- `GET /users/me` — protected endpoint that returns the logged-in user's profile
+- JWT tokens signed with a secret key and set to expire after a configurable duration
+- Consistent `401` responses for all authentication failures
+- Passwords are never stored or returned in plain text
 
 ---
 
@@ -42,6 +59,11 @@ There is no frontend yet. All features are tested via the browser, curl, or the 
 | External data | Jolpica F1 API |
 | HTTP client | requests |
 | Environment | python-dotenv |
+| Password hashing | passlib + bcrypt |
+| JWT tokens | python-jose |
+| Frontend | React + Vite + TypeScript |
+| Styling | Tailwind CSS v4 |
+| Routing | React Router v6 |
 
 ---
 
@@ -71,19 +93,26 @@ Data is fetched manually and stored in PostgreSQL. The app serves data from its 
 ```
 gridpulse/
 ├── app/
+│   ├── auth/
+│   │   ├── dependencies.py       # get_current_user dependency for protected routes
+│   │   └── security.py           # password hashing and JWT utilities
 │   ├── database/
 │   │   └── database.py           # DB engine, session, Base
 │   ├── models/
 │   │   ├── team.py
 │   │   ├── driver.py
 │   │   ├── race.py
-│   │   └── standing.py
+│   │   ├── standing.py
+│   │   └── user.py               # User model (Phase 4)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
 │   │   ├── race.py
-│   │   └── standing.py
+│   │   ├── standing.py
+│   │   └── user.py               # UserCreate, UserLogin, UserResponse, Token
 │   ├── routes/
+│   │   ├── auth.py               # POST /auth/signup, POST /auth/login
+│   │   ├── users.py              # GET /users/me
 │   │   ├── drivers.py
 │   │   ├── teams.py
 │   │   ├── calendar.py
@@ -92,6 +121,7 @@ gridpulse/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   └── data_ingestion.py     # maps API data into SQLAlchemy models
 │   └── main.py
+├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
 │   ├── create_tables.py          # creates tables in PostgreSQL
 │   ├── seed.py                   # inserts small local sample data (Phase 1)
@@ -156,13 +186,25 @@ Copy the example file:
 cp .env.example .env
 ```
 
-Open `.env` and fill in your database credentials:
+Open `.env` and fill in your database credentials and JWT settings:
 
 ```
 DATABASE_URL=postgresql://your_username:your_password@localhost:5432/gridpulse_db
+
+JWT_SECRET_KEY=your-secret-key-here
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=60
 ```
 
 Replace `your_username` and `your_password` with your actual PostgreSQL credentials. Your username is usually your Mac username — run `whoami` in the terminal if you are unsure.
+
+To generate a secure `JWT_SECRET_KEY`, run:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Copy the output into your `.env` file. Never commit this value to git.
 
 ### 6. Create the database tables
 
@@ -179,6 +221,7 @@ Done. Tables created:
   - drivers
   - races
   - driver_standings
+  - users
 ```
 
 ### 7. Sync real F1 data from Jolpica
@@ -281,6 +324,8 @@ ORDER BY s.position;
 
 ## Available Endpoints
 
+### Public endpoints
+
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | Welcome message |
@@ -290,6 +335,14 @@ ORDER BY s.position;
 | GET | `/teams` | List all 10 teams |
 | GET | `/calendar` | Full 2025 race calendar |
 | GET | `/standings/drivers` | Driver championship standings |
+
+### Authentication endpoints
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| POST | `/auth/signup` | No | Create a new user account |
+| POST | `/auth/login` | No | Log in and receive a JWT token |
+| GET | `/users/me` | Yes — Bearer token | Return the logged-in user's profile |
 
 ---
 
@@ -405,6 +458,46 @@ Note: `podiums` is `0` for all drivers — Jolpica standings do not include podi
 
 ---
 
+## Testing Authentication
+
+All auth endpoints can be tested at `http://127.0.0.1:8000/docs` while the server is running.
+
+### Test signup
+
+1. Open `/docs` and find **POST /auth/signup**.
+2. Click **Try it out** and enter:
+    ```json
+    {
+      "email": "test@example.com",
+      "password": "password123"
+    }
+    ```
+3. Click **Execute**. You should get a `201` response with your user profile — no `password_hash` field will appear.
+4. Send the same request again. You should get a `400` — "An account with that email already exists."
+
+### Test login
+
+1. Find **POST /auth/login**.
+2. Click **Try it out** and enter:
+    ```json
+    {
+      "email": "test@example.com",
+      "password": "password123"
+    }
+    ```
+3. Click **Execute**. You should get a `200` response with an `access_token` string and `"token_type": "bearer"`.
+4. Copy the `access_token` value (the long string, without the quotes).
+5. Try logging in with a wrong password. You should get a `401` — "Incorrect email or password."
+
+### Test GET /users/me
+
+1. Click the **Authorize** padlock button at the top right of the `/docs` page.
+2. In the **HTTPBearer** field, paste the token you copied from the login response. Click **Authorize**, then **Close**.
+3. Find **GET /users/me** → **Try it out** → **Execute**. You should get a `200` with your user profile.
+4. To test the failure case: click **Authorize** again → **Logout**, then try **GET /users/me** again. You should get a `401` — "Not authenticated."
+
+---
+
 ## Interactive API Docs
 
 FastAPI generates interactive documentation automatically.
@@ -417,8 +510,7 @@ Open `http://127.0.0.1:8000/docs` in your browser while the server is running. Y
 
 The following features are planned but not yet built:
 
-- Frontend of any kind
-- User accounts or authentication
+- Frontend auth UI (signup, login, token storage)
 - Google sign-in
 - Favourite drivers or teams
 - Notifications of any kind
@@ -438,16 +530,17 @@ The following features are planned but not yet built:
 - Scheduled or automatic data sync
 - Constructor standings endpoint
 - Team base location data
+- Alembic database migrations
 
 ---
 
 ## Future Phases
 
-**Phase 3 — Frontend Foundation + Multi-Page UI**
-Build a React frontend with Tailwind CSS and React Router. Pages: Home, Drivers, Driver Detail, Teams, Calendar, Standings. Consumes the existing public API endpoints.
+**Phase 3 — Frontend Foundation + Multi-Page UI** *(complete)*
+React frontend with Tailwind CSS and React Router. Pages: Home, Drivers, Driver Detail, Teams, Calendar, Standings.
 
-**Phase 4 — User Accounts and Local Authentication**
-Add email and password authentication with JWT tokens. Users can sign up, log in, and access protected routes.
+**Phase 4 — User Accounts and Local Authentication** *(complete)*
+Email and password authentication with JWT tokens. Users can sign up, log in, and access protected routes.
 
 **Phase 5 — Google Sign-In**
 Allow users to sign in with their Google account using OAuth.

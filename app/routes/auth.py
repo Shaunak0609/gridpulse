@@ -38,6 +38,7 @@ def login(body: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     token = create_access_token(data={"sub": user.email})
