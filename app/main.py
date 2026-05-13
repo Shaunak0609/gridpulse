@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import drivers, teams, calendar, standings, auth, users
+from app.routes import drivers, teams, calendar, standings, auth, users, google_auth
 
 load_dotenv()
 
@@ -20,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(google_auth.router)
 app.include_router(users.router)
 app.include_router(drivers.router)
 app.include_router(teams.router)
