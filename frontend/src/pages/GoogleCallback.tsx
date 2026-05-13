@@ -16,13 +16,15 @@ export default function GoogleCallback() {
     const token = searchParams.get('token')
 
     if (!token) {
-      navigate('/login')
+      navigate('/login?error=Google+sign-in+did+not+return+a+token.')
       return
     }
 
     loginWithToken(token)
       .then(() => navigate('/'))
-      .catch(() => navigate('/login'))
+      .catch(() =>
+        navigate('/login?error=Google+sign-in+succeeded+but+your+session+could+not+be+started.')
+      )
   }, [])
 
   return (

@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 4
+## Current Status — Phase 5
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -44,6 +44,26 @@ This repository contains the backend API built with Python and FastAPI.
 - Consistent `401` responses for all authentication failures
 - Passwords are never stored or returned in plain text
 
+### Phase 4.5 — Frontend Auth UI (complete)
+
+- Login and Signup pages with loading and inline error states
+- Auth state management via React Context (AuthContext)
+- JWT stored in `localStorage`, restored automatically on page refresh
+- Protected `/profile` page — redirects to `/login` if unauthenticated
+- Navbar updates based on logged-in state
+
+### Phase 5 — Google Sign-In (complete)
+
+- `users` table extended with `google_sub`, `auth_provider`, and `profile_picture_url`
+- `GET /auth/google/start` — redirects browser to Google's account picker
+- `GET /auth/google/callback` — exchanges Google auth code for tokens, finds or creates user, returns a GridPulse JWT
+- Existing local accounts are automatically linked when the same email is used with Google
+- All Google callback errors redirect to `/login` with a human-readable message instead of showing raw JSON
+- Frontend "Continue with Google" button on Login and Signup pages
+- Frontend `/auth/google/callback` page reads the token from the URL and completes the session
+- `GET /users/me` works identically for both local and Google users
+- Google Client Secret is never exposed to the frontend
+
 ---
 
 ## Tech Stack
@@ -61,6 +81,7 @@ This repository contains the backend API built with Python and FastAPI.
 | Environment | python-dotenv |
 | Password hashing | passlib + bcrypt |
 | JWT tokens | python-jose |
+| Google OAuth | google-auth |
 | Frontend | React + Vite + TypeScript |
 | Styling | Tailwind CSS v4 |
 | Routing | React Router v6 |
@@ -95,6 +116,7 @@ gridpulse/
 ├── app/
 │   ├── auth/
 │   │   ├── dependencies.py       # get_current_user dependency for protected routes
+│   │   ├── google_oauth.py       # Google ID token verification utility
 │   │   └── security.py           # password hashing and JWT utilities
 │   ├── database/
 │   │   └── database.py           # DB engine, session, Base
@@ -112,6 +134,7 @@ gridpulse/
 │   │   └── user.py               # UserCreate, UserLogin, UserResponse, Token
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
+│   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
 │   │   ├── users.py              # GET /users/me
 │   │   ├── drivers.py
 │   │   ├── teams.py
@@ -186,7 +209,7 @@ Copy the example file:
 cp .env.example .env
 ```
 
-Open `.env` and fill in your database credentials and JWT settings:
+Open `.env` and fill in your database credentials, JWT settings, and Google OAuth credentials:
 
 ```
 DATABASE_URL=postgresql://your_username:your_password@localhost:5432/gridpulse_db
@@ -194,6 +217,11 @@ DATABASE_URL=postgresql://your_username:your_password@localhost:5432/gridpulse_d
 JWT_SECRET_KEY=your-secret-key-here
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=60
+
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
+FRONTEND_URL=http://localhost:5173
 ```
 
 Replace `your_username` and `your_password` with your actual PostgreSQL credentials. Your username is usually your Mac username — run `whoami` in the terminal if you are unsure.
@@ -205,6 +233,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 Copy the output into your `.env` file. Never commit this value to git.
+
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` come from Google Cloud Console — see the Google OAuth Setup section below.
 
 ### 6. Create the database tables
 
@@ -322,6 +352,41 @@ ORDER BY s.position;
 
 ---
 
+## Google OAuth Setup
+
+Google sign-in requires a one-time manual setup in Google Cloud Console.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project named `GridPulse`.
+2. Navigate to **APIs & Services → OAuth consent screen**. Choose **External**, fill in the app name and your email, then add yourself as a test user.
+3. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**.
+   - Application type: **Web application**
+   - Name: `GridPulse Dev`
+   - Authorised JavaScript origins: `http://localhost:5173`
+   - Authorised redirect URIs: `http://127.0.0.1:8000/auth/google/callback`
+4. Copy the **Client ID** and **Client Secret** into your `.env` file.
+
+**Important:** `GOOGLE_REDIRECT_URI` must use `127.0.0.1`, not `localhost`, and must match the URI registered in Google Cloud Console exactly.
+
+### Testing Google Sign-In
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Start the frontend: `cd frontend && npm run dev`
+3. Open `http://localhost:5173/login` and click **Continue with Google**.
+4. Select your test Google account in the popup.
+5. You should be redirected back to the frontend, logged in, with your Google email in the navbar.
+6. Visit `/profile` — `auth_provider` shows `local` if you previously had an email/password account with the same address (accounts are linked), or `google` if this was a fresh sign-up.
+7. `GET /users/me` works the same way for Google users as it does for local users — the backend only checks the GridPulse JWT, not the original auth method.
+
+**Common problems:**
+
+| Problem | Fix |
+|---|---|
+| `redirect_uri_mismatch` | The URI in `.env` doesn't exactly match what you registered. Check `127.0.0.1` vs `localhost`. |
+| "Access blocked: app not verified" | Add your Gmail to the test users list in OAuth consent screen. |
+| Redirected to `/login` with an error message | Check that `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are correctly set in `.env`. |
+
+---
+
 ## Available Endpoints
 
 ### Public endpoints
@@ -342,6 +407,8 @@ ORDER BY s.position;
 |---|---|---|---|
 | POST | `/auth/signup` | No | Create a new user account |
 | POST | `/auth/login` | No | Log in and receive a JWT token |
+| GET | `/auth/google/start` | No | Redirect browser to Google sign-in |
+| GET | `/auth/google/callback` | No | Handle Google redirect, return JWT |
 | GET | `/users/me` | Yes — Bearer token | Return the logged-in user's profile |
 
 ---
@@ -510,8 +577,6 @@ Open `http://127.0.0.1:8000/docs` in your browser while the server is running. Y
 
 The following features are planned but not yet built:
 
-- Frontend auth UI (signup, login, token storage)
-- Google sign-in
 - Favourite drivers or teams
 - Notifications of any kind
 - Email notifications
@@ -542,8 +607,8 @@ React frontend with Tailwind CSS and React Router. Pages: Home, Drivers, Driver 
 **Phase 4 — User Accounts and Local Authentication** *(complete)*
 Email and password authentication with JWT tokens. Users can sign up, log in, and access protected routes.
 
-**Phase 5 — Google Sign-In**
-Allow users to sign in with their Google account using OAuth.
+**Phase 5 — Google Sign-In** *(complete)*
+Google OAuth via Authorization Code flow. Users can sign in with their Google account. Existing local accounts are linked automatically by email.
 
 **Phase 6 — Race Calendar and In-App Reminders**
 Let signed-in users set reminders for upcoming sessions. Background jobs deliver in-app notifications.

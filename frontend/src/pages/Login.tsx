@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -7,10 +7,14 @@ const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 export default function Login() {
   const { login, isAuthenticated, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  // Seed the error state from ?error= so Google failures surface immediately
+  const [error, setError] = useState<string | null>(
+    searchParams.get('error')
+  )
   const [submitting, setSubmitting] = useState(false)
 
   if (authLoading) return null
