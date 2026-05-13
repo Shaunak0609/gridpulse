@@ -38,6 +38,8 @@ export interface AuthUser {
   email: string
   username: string | null
   timezone: string | null
+  auth_provider: string
+  profile_picture_url: string | null
 }
 
 export interface SignupPayload {

@@ -1,11 +1,14 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { signup } from '../services/api'
 
 export default function Signup() {
-  const { login } = useAuth()
+  const { login, isAuthenticated, loading } = useAuth()
   const navigate = useNavigate()
+
+  if (loading) return null
+  if (isAuthenticated) return <Navigate to="/" replace />
 
   const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')

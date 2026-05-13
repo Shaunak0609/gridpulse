@@ -18,6 +18,8 @@ class UserResponse(BaseModel):
     email: str
     username: str | None
     timezone: str | None
+    auth_provider: str
+    profile_picture_url: str | None
 
     model_config = {"from_attributes": True}
 
