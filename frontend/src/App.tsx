@@ -7,6 +7,8 @@ import DriverDetail from './pages/DriverDetail'
 import Teams from './pages/Teams'
 import Calendar from './pages/Calendar'
 import Standings from './pages/Standings'
+import Login from './pages/Login'
+import Signup from './pages/Signup'
 
 function App() {
   return (
@@ -21,6 +23,8 @@ function App() {
             <Route path="/teams" element={<Teams />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/standings" element={<Standings />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
           </Routes>
         </main>
       </div>
