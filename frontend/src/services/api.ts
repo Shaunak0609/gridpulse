@@ -1,4 +1,4 @@
-import type { AuthUser, Driver, DriverStanding, LoginPayload, Notification, Race, Reminder, ReminderCreate, SignupPayload, Team, TokenResponse } from '../types'
+import type { AuthUser, Driver, DriverStanding, EmailPreferences, LoginPayload, Notification, Race, Reminder, ReminderCreate, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -109,4 +109,39 @@ export const deleteNotification = (token: string, id: number): Promise<void> =>
     headers: { Authorization: `Bearer ${token}` },
   }).then(res => {
     if (!res.ok) throw new Error('Failed to delete notification')
+  })
+
+// ─── Email preference endpoints ──────────────────────────────────────────────
+
+export const getEmailPreferences = (token: string): Promise<EmailPreferences> =>
+  fetch(`${API_BASE}/users/me/email-preferences`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch email preferences')
+    return data as EmailPreferences
+  })
+
+export const updateEmailPreferences = (
+  token: string,
+  payload: Partial<EmailPreferences>,
+): Promise<EmailPreferences> =>
+  fetch(`${API_BASE}/users/me/email-preferences`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to update email preferences')
+    return data as EmailPreferences
+  })
+
+export const sendTestEmail = (token: string): Promise<{ message: string }> =>
+  fetch(`${API_BASE}/email/test`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to send test email')
+    return data as { message: string }
   })

@@ -13,6 +13,7 @@ import Signup from './pages/Signup'
 import Profile from './pages/Profile'
 import Reminders from './pages/Reminders'
 import Notifications from './pages/Notifications'
+import Settings from './pages/Settings'
 import GoogleCallback from './pages/GoogleCallback'
 
 function App() {
@@ -52,6 +53,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Notifications />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
                 </ProtectedRoute>
               }
             />

@@ -11,6 +11,7 @@ const publicNavLinks = [
 const authNavLinks = [
   { to: '/reminders', label: 'Reminders' },
   { to: '/notifications', label: 'Notifications' },
+  { to: '/settings', label: 'Settings' },
 ]
 
 export default function Navbar() {
