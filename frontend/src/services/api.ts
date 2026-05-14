@@ -1,4 +1,4 @@
-import type { AuthUser, Driver, DriverStanding, LoginPayload, Race, SignupPayload, Team, TokenResponse } from '../types'
+import type { AuthUser, Driver, DriverStanding, LoginPayload, Notification, Race, Reminder, ReminderCreate, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -51,3 +51,62 @@ export const getCurrentUser = (token: string) => {
     return data as AuthUser
   })
 }
+
+// ─── Reminder endpoints ──────────────────────────────────────────────────────
+
+export const getReminders = (token: string): Promise<Reminder[]> =>
+  fetch(`${API_BASE}/reminders`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch reminders')
+    return data as Reminder[]
+  })
+
+export const createReminder = (token: string, payload: ReminderCreate): Promise<Reminder> =>
+  fetch(`${API_BASE}/reminders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to create reminder')
+    return data as Reminder
+  })
+
+export const deleteReminder = (token: string, id: number): Promise<void> =>
+  fetch(`${API_BASE}/reminders/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(res => {
+    if (!res.ok) throw new Error('Failed to delete reminder')
+  })
+
+// ─── Notification endpoints ──────────────────────────────────────────────────
+
+export const getNotifications = (token: string): Promise<Notification[]> =>
+  fetch(`${API_BASE}/notifications`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch notifications')
+    return data as Notification[]
+  })
+
+export const markNotificationRead = (token: string, id: number): Promise<Notification> =>
+  fetch(`${API_BASE}/notifications/${id}/read`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to mark notification as read')
+    return data as Notification
+  })
+
+export const deleteNotification = (token: string, id: number): Promise<void> =>
+  fetch(`${API_BASE}/notifications/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(res => {
+    if (!res.ok) throw new Error('Failed to delete notification')
+  })

@@ -58,3 +58,31 @@ export interface TokenResponse {
   access_token: string
   token_type: string
 }
+
+export interface Reminder {
+  id: number
+  user_id: number
+  race_id: number | null
+  title: string
+  reminder_time: string
+  sent: boolean
+  created_at: string
+}
+
+export interface ReminderCreate {
+  title: string
+  reminder_time: string
+  race_id?: number
+}
+
+export interface Notification {
+  id: number
+  user_id: number
+  type: string
+  title: string
+  message: string | null
+  read: boolean
+  created_at: string
+  related_race_id: number | null
+  related_driver_id: number | null
+}

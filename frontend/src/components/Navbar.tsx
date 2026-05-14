@@ -1,11 +1,16 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
-const navLinks = [
+const publicNavLinks = [
   { to: '/drivers', label: 'Drivers' },
   { to: '/teams', label: 'Teams' },
   { to: '/calendar', label: 'Calendar' },
   { to: '/standings', label: 'Standings' },
+]
+
+const authNavLinks = [
+  { to: '/reminders', label: 'Reminders' },
+  { to: '/notifications', label: 'Notifications' },
 ]
 
 export default function Navbar() {
@@ -16,6 +21,10 @@ export default function Navbar() {
     logout()
     navigate('/')
   }
+
+  const navLinks = isAuthenticated
+    ? [...publicNavLinks, ...authNavLinks]
+    : publicNavLinks
 
   return (
     <nav className="bg-gray-900 border-b border-gray-800">

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.database.database import get_db
+from app.models.notification import Notification
 from app.models.reminder import Reminder
 from app.models.user import User
 from app.schemas.reminder import ReminderCreate, ReminderResponse
@@ -23,6 +24,16 @@ def create_reminder(
         reminder_time=body.reminder_time,
     )
     db.add(reminder)
+
+    notification = Notification(
+        user_id=current_user.id,
+        type="reminder_created",
+        title="Reminder created",
+        message=f'Your reminder "{body.title}" has been set.',
+        related_race_id=body.race_id,
+    )
+    db.add(notification)
+
     db.commit()
     db.refresh(reminder)
     return reminder

@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 5
+## Current Status — Phase 6
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -63,6 +63,21 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend `/auth/google/callback` page reads the token from the URL and completes the session
 - `GET /users/me` works identically for both local and Google users
 - Google Client Secret is never exposed to the frontend
+
+### Phase 6 — Race Calendar and In-App Reminders (complete)
+
+- `reminders` table — stores per-user reminders linked to a race, with a `sent` flag for future delivery
+- `notifications` table — stores in-app activity records with a `read` flag and an optional race/driver link
+- `POST /reminders` — create a reminder (protected); also creates an in-app notification automatically
+- `GET /reminders` — list the current user's reminders, ordered by reminder time (protected)
+- `DELETE /reminders/{id}` — delete a reminder; returns 404 if not found, 403 if it belongs to another user (protected)
+- `GET /notifications` — list the current user's notifications, newest first (protected)
+- `PUT /notifications/{id}/read` — mark a single notification as read (protected)
+- `DELETE /notifications/{id}` — delete a notification; returns 404/403 on invalid access (protected)
+- Frontend `/reminders` page — lists reminders with delete, loading skeleton, and empty state; requires login
+- Frontend `/notifications` page — lists notifications with mark-as-read, delete, unread count badge; requires login
+- Calendar page — shows "+ Reminder" button on upcoming races for logged-in users; shows "Log in to remind" for logged-out users
+- Navbar — Reminders and Notifications links visible only when logged in
 
 ---
 
@@ -125,13 +140,17 @@ gridpulse/
 │   │   ├── driver.py
 │   │   ├── race.py
 │   │   ├── standing.py
-│   │   └── user.py               # User model (Phase 4)
+│   │   ├── user.py               # User model (Phase 4)
+│   │   ├── reminder.py           # Reminder model (Phase 6)
+│   │   └── notification.py       # Notification model (Phase 6)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
 │   │   ├── race.py
 │   │   ├── standing.py
-│   │   └── user.py               # UserCreate, UserLogin, UserResponse, Token
+│   │   ├── user.py               # UserCreate, UserLogin, UserResponse, Token
+│   │   ├── reminder.py           # ReminderCreate, ReminderResponse (Phase 6)
+│   │   └── notification.py       # NotificationResponse (Phase 6)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -139,7 +158,9 @@ gridpulse/
 │   │   ├── drivers.py
 │   │   ├── teams.py
 │   │   ├── calendar.py
-│   │   └── standings.py
+│   │   ├── standings.py
+│   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6)
+│   │   └── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   └── data_ingestion.py     # maps API data into SQLAlchemy models
@@ -252,6 +273,8 @@ Done. Tables created:
   - races
   - driver_standings
   - users
+  - reminders
+  - notifications
 ```
 
 ### 7. Sync real F1 data from Jolpica
@@ -410,6 +433,26 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/auth/google/start` | No | Redirect browser to Google sign-in |
 | GET | `/auth/google/callback` | No | Handle Google redirect, return JWT |
 | GET | `/users/me` | Yes — Bearer token | Return the logged-in user's profile |
+
+### Reminder endpoints
+
+All reminder endpoints require a valid JWT Bearer token. Requests without a token return `401`. Requests for another user's reminder return `403`.
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| POST | `/reminders` | Yes — Bearer token | Create a reminder; also creates a notification |
+| GET | `/reminders` | Yes — Bearer token | List the current user's reminders |
+| DELETE | `/reminders/{id}` | Yes — Bearer token | Delete a reminder by ID |
+
+### Notification endpoints
+
+All notification endpoints require a valid JWT Bearer token.
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| GET | `/notifications` | Yes — Bearer token | List the current user's notifications, newest first |
+| PUT | `/notifications/{id}/read` | Yes — Bearer token | Mark a notification as read |
+| DELETE | `/notifications/{id}` | Yes — Bearer token | Delete a notification by ID |
 
 ---
 
@@ -573,14 +616,55 @@ Open `http://127.0.0.1:8000/docs` in your browser while the server is running. Y
 
 ---
 
+## Testing Reminders and Notifications
+
+### Test reminders in FastAPI docs
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Open `http://127.0.0.1:8000/docs`
+3. Log in via **POST /auth/login** and copy the `access_token`
+4. Click the **Authorize** padlock, paste the token, click **Authorize**
+5. Find **POST /reminders** → **Try it out** and enter:
+   ```json
+   {
+     "title": "Monaco Grand Prix – Race Day",
+     "reminder_time": "2026-05-25T09:00:00Z",
+     "race_id": 6
+   }
+   ```
+6. Click **Execute** — you should get a `201` response with the new reminder
+7. Call **GET /reminders** — your reminder should appear
+8. Call **GET /notifications** — you should see a `"reminder_created"` notification created automatically
+9. Call **PUT /notifications/{id}/read** with the notification's ID — `read` should become `true`
+10. Call **DELETE /reminders/{id}** with the reminder's ID — you should get `204 No Content`
+
+### Test reminders in the frontend
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in at `http://localhost:5173/login`
+3. Go to `/calendar` — upcoming race rows should show a "+ Reminder" button (visible once the 2026 race data is seeded)
+4. Click "+ Reminder" — button should briefly show "Adding…" then switch to "Reminder set ✓"
+5. Go to `/reminders` — the new reminder should appear in the list
+6. Click the trash icon to delete it — the row should disappear immediately
+
+### Test notifications in the frontend
+
+1. After creating a reminder (see above), go to `/notifications`
+2. You should see a "Reminder created" notification with a red unread dot and an unread count badge in the header
+3. Click **Mark read** — the row dims, the dot turns grey, and the button disappears
+4. Click the trash icon — the row disappears and the count badge updates
+5. Log out and try navigating to `/notifications` directly — you should be redirected to `/login`
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
 - Favourite drivers or teams
-- Notifications of any kind
 - Email notifications
-- Race calendar reminders
+- Push notifications
+- Scheduled or automatic reminder delivery (the `sent` flag exists but no background job runs yet)
 - AI features
 - Live race data
 - Race control messages
@@ -610,8 +694,8 @@ Email and password authentication with JWT tokens. Users can sign up, log in, an
 **Phase 5 — Google Sign-In** *(complete)*
 Google OAuth via Authorization Code flow. Users can sign in with their Google account. Existing local accounts are linked automatically by email.
 
-**Phase 6 — Race Calendar and In-App Reminders**
-Let signed-in users set reminders for upcoming sessions. Background jobs deliver in-app notifications.
+**Phase 6 — Race Calendar and In-App Reminders** *(complete)*
+Signed-in users can set reminders for upcoming races from the Calendar page. Reminders and in-app notifications are stored in the database and viewable in the frontend.
 
 **Phase 7 — Email Notifications**
 Send optional email reminders for race sessions and favourite-driver updates using a provider such as Resend or SendGrid.

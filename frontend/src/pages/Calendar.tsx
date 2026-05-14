@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { getCalendar } from '../services/api'
+import { Link } from 'react-router-dom'
+import { getCalendar, createReminder } from '../services/api'
+import { useAuth } from '../context/AuthContext'
 import type { Race } from '../types'
 
 function formatDate(dateStr: string | null): string {
@@ -21,9 +23,30 @@ function isNext(race: Race, allRaces: Race[]): boolean {
   return upcoming?.id === race.id
 }
 
+type ReminderStatus = 'idle' | 'loading' | 'success' | 'error'
+
 function RaceRow({ race, allRaces }: { race: Race; allRaces: Race[] }) {
+  const { isAuthenticated, token } = useAuth()
   const past = isPast(race.start_date)
   const next = isNext(race, allRaces)
+  const [reminderStatus, setReminderStatus] = useState<ReminderStatus>('idle')
+  const [reminderError, setReminderError] = useState<string | null>(null)
+
+  async function handleAddReminder() {
+    if (!token) return
+    setReminderStatus('loading')
+    try {
+      await createReminder(token, {
+        title: `${race.name} – Race Day`,
+        reminder_time: `${race.start_date}T09:00:00Z`,
+        race_id: race.id,
+      })
+      setReminderStatus('success')
+    } catch (e) {
+      setReminderStatus('error')
+      setReminderError(e instanceof Error ? e.message : 'Failed to create reminder')
+    }
+  }
 
   return (
     <div
@@ -54,6 +77,35 @@ function RaceRow({ race, allRaces }: { race: Race; allRaces: Race[] }) {
           {formatDate(race.start_date)}
         </p>
       </div>
+
+      {/* Reminder action — only for upcoming races with a known date */}
+      {!past && race.start_date && (
+        <div className="shrink-0 w-28 text-right">
+          {!isAuthenticated ? (
+            <Link
+              to="/login"
+              className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              Log in to remind
+            </Link>
+          ) : reminderStatus === 'success' ? (
+            <span className="text-xs text-green-500">Reminder set ✓</span>
+          ) : reminderStatus === 'error' ? (
+            <span className="text-xs text-red-400">{reminderError}</span>
+          ) : (
+            <button
+              onClick={handleAddReminder}
+              disabled={reminderStatus === 'loading'}
+              className="text-xs text-gray-500 hover:text-white border border-gray-800 hover:border-gray-600 px-2.5 py-1 rounded-lg transition-colors duration-150 disabled:opacity-40"
+            >
+              {reminderStatus === 'loading' ? 'Adding…' : '+ Reminder'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Spacer keeps layout consistent for past races */}
+      {(past || !race.start_date) && <div className="shrink-0 w-28" />}
     </div>
   )
 }

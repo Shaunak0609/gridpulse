@@ -11,6 +11,8 @@ import Standings from './pages/Standings'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Profile from './pages/Profile'
+import Reminders from './pages/Reminders'
+import Notifications from './pages/Notifications'
 import GoogleCallback from './pages/GoogleCallback'
 
 function App() {
@@ -34,6 +36,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reminders"
+              element={
+                <ProtectedRoute>
+                  <Reminders />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <Notifications />
                 </ProtectedRoute>
               }
             />
