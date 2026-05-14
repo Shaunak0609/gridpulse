@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 6
+## Current Status — Phase 7
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -78,6 +78,27 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend `/notifications` page — lists notifications with mark-as-read, delete, unread count badge; requires login
 - Calendar page — shows "+ Reminder" button on upcoming races for logged-in users; shows "Log in to remind" for logged-out users
 - Navbar — Reminders and Notifications links visible only when logged in
+- Duplicate reminder prevention — backend returns `409` if a reminder for the same race already exists; frontend pre-loads existing reminder IDs so the button shows "Reminder set ✓" on page load
+
+### Phase 6.5 — Configurable F1 Season (complete)
+
+- `F1_SEASON` environment variable controls which season is fetched and served (default: `2026`)
+- Sync script, calendar endpoint, and standings endpoint all read from `F1_SEASON`
+- Calendar and standings filter by season — only the configured season's data is returned
+
+### Phase 7 — Email Notifications (complete)
+
+- Three opt-in email preference fields added to the `users` table: `email_notifications_enabled`, `calendar_email_reminders_enabled`, `favorite_driver_email_alerts_enabled` (all default `false`)
+- `email_sent` and `email_sent_at` tracking columns added to the `reminders` table
+- `GET /users/me/email-preferences` — returns the current user's email preference settings (protected)
+- `PUT /users/me/email-preferences` — updates one or more email preferences (partial update; protected)
+- `POST /email/test` — sends a test email to the current user; requires `email_notifications_enabled = true` (protected)
+- `POST /email/send-due-reminders` — development endpoint to manually trigger delivery of all due reminder emails (protected)
+- Email delivery via **Resend** — `app/services/email_service.py` wraps the Resend SDK; all Resend errors are normalised to `RuntimeError` so callers have a single exception type to handle
+- `app/services/reminder_email_service.py` — shared delivery logic: queries due, unsent reminders for opted-in users, sends each email, marks `email_sent = true`, and returns a `{total, sent, failed}` summary
+- `scripts/send_due_reminder_emails.py` — standalone CLI script that calls the same service; intended for use with a cron job or scheduler in production
+- Frontend `/settings` page — email preference toggles with optimistic UI updates; "Send test email" button visible when the master switch is on; requires login
+- Navbar — Settings link visible only when logged in
 
 ---
 
@@ -97,6 +118,7 @@ This repository contains the backend API built with Python and FastAPI.
 | Password hashing | passlib + bcrypt |
 | JWT tokens | python-jose |
 | Google OAuth | google-auth |
+| Email delivery | Resend |
 | Frontend | React + Vite + TypeScript |
 | Styling | Tailwind CSS v4 |
 | Routing | React Router v6 |
@@ -154,22 +176,28 @@ gridpulse/
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
-│   │   ├── users.py              # GET /users/me
+│   │   ├── users.py              # GET /users/me, GET/PUT /users/me/email-preferences
 │   │   ├── drivers.py
 │   │   ├── teams.py
 │   │   ├── calendar.py
 │   │   ├── standings.py
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6)
-│   │   └── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
+│   │   ├── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
+│   │   └── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
-│   │   └── data_ingestion.py     # maps API data into SQLAlchemy models
+│   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
+│   │   ├── email_service.py      # Resend wrapper (Phase 7)
+│   │   └── reminder_email_service.py  # due-reminder delivery logic (Phase 7)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
 │   ├── create_tables.py          # creates tables in PostgreSQL
 │   ├── seed.py                   # inserts small local sample data (Phase 1)
-│   └── sync_f1_data.py           # fetches and stores real F1 data from Jolpica
+│   ├── sync_f1_data.py           # fetches and stores real F1 data from Jolpica
+│   ├── migrate_add_email_preferences.py       # adds email preference columns to users (Phase 7)
+│   ├── migrate_add_reminder_email_tracking.py # adds email_sent columns to reminders (Phase 7)
+│   └── send_due_reminder_emails.py            # CLI script to send due reminder emails (Phase 7)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
 └── requirements.txt
@@ -230,7 +258,7 @@ Copy the example file:
 cp .env.example .env
 ```
 
-Open `.env` and fill in your database credentials, JWT settings, and Google OAuth credentials:
+Open `.env` and fill in your database credentials, JWT settings, Google OAuth credentials, and email settings:
 
 ```
 DATABASE_URL=postgresql://your_username:your_password@localhost:5432/gridpulse_db
@@ -245,7 +273,14 @@ GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
 FRONTEND_URL=http://localhost:5173
 
 F1_SEASON=2026
+
+RESEND_API_KEY=re_your_api_key_here
+EMAIL_FROM=GridPulse <you@yourdomain.com>
 ```
+
+`RESEND_API_KEY` — create a free account at [resend.com](https://resend.com), go to **API Keys**, and generate a key.
+
+`EMAIL_FROM` — the sender address shown in outgoing emails. With a free Resend account the only verified sender is `onboarding@resend.dev`, which can only deliver to the email address you registered with. To send to other addresses, verify your own domain in the Resend dashboard.
 
 Replace `your_username` and `your_password` with your actual PostgreSQL credentials. Your username is usually your Mac username — run `whoami` in the terminal if you are unsure.
 
@@ -463,6 +498,8 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/auth/google/start` | No | Redirect browser to Google sign-in |
 | GET | `/auth/google/callback` | No | Handle Google redirect, return JWT |
 | GET | `/users/me` | Yes — Bearer token | Return the logged-in user's profile |
+| GET | `/users/me/email-preferences` | Yes — Bearer token | Return the current user's email preferences |
+| PUT | `/users/me/email-preferences` | Yes — Bearer token | Update one or more email preferences |
 
 ### Reminder endpoints
 
@@ -483,6 +520,13 @@ All notification endpoints require a valid JWT Bearer token.
 | GET | `/notifications` | Yes — Bearer token | List the current user's notifications, newest first |
 | PUT | `/notifications/{id}/read` | Yes — Bearer token | Mark a notification as read |
 | DELETE | `/notifications/{id}` | Yes — Bearer token | Delete a notification by ID |
+
+### Email endpoints
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| POST | `/email/test` | Yes — Bearer token | Send a test email to the current user; requires `email_notifications_enabled = true` |
+| POST | `/email/send-due-reminders` | Yes — Bearer token | Development endpoint — send all due, unsent reminder emails now |
 
 ---
 
@@ -687,14 +731,58 @@ Open `http://127.0.0.1:8000/docs` in your browser while the server is running. Y
 
 ---
 
+## Testing Email Notifications
+
+### Set up email credentials
+
+Make sure `RESEND_API_KEY` and `EMAIL_FROM` are set in your `.env` file before testing. Restart the backend after editing `.env`.
+
+### Enable email preferences via the frontend
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and go to `http://localhost:5173/settings`
+3. Toggle **Email notifications** on (master switch)
+4. Toggle **Race reminder emails** on
+5. Click **Send test email** — you should receive an email at your registered address within a few seconds
+
+### Enable email preferences via the API docs
+
+1. Open `http://127.0.0.1:8000/docs`, log in, and authorize
+2. Find **PUT /users/me/email-preferences** → **Try it out** and enter:
+   ```json
+   {
+     "email_notifications_enabled": true,
+     "calendar_email_reminders_enabled": true
+   }
+   ```
+3. Click **Execute** — you should get a `200` response with both fields set to `true`
+4. Find **POST /email/test** → **Try it out** → **Execute** — you should receive a test email
+
+### Test due reminder delivery
+
+1. Create a reminder for a race whose `start_date` is in the past, or manually insert a reminder row with `reminder_time` in the past via psql
+2. Call **POST /email/send-due-reminders** in the API docs — the response will show `total_due`, `sent`, and `failed` counts
+3. Alternatively, run the CLI script directly:
+   ```bash
+   python scripts/send_due_reminder_emails.py
+   ```
+   Expected output:
+   ```
+   Found 1 due reminder(s).
+   Sent: 1  Failed: 0
+   ```
+4. Running either the endpoint or the script again immediately will show `total_due: 0` because processed reminders are marked `email_sent = true`
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
 - Favourite drivers or teams
-- Email notifications
+- Favourite-driver email alerts (preference toggle exists; delivery logic is not yet built)
 - Push notifications
-- Scheduled or automatic reminder delivery (the `sent` flag exists but no background job runs yet)
+- Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
 - AI features
 - Live race data
 - Race control messages
@@ -727,8 +815,8 @@ Google OAuth via Authorization Code flow. Users can sign in with their Google ac
 **Phase 6 — Race Calendar and In-App Reminders** *(complete)*
 Signed-in users can set reminders for upcoming races from the Calendar page. Reminders and in-app notifications are stored in the database and viewable in the frontend.
 
-**Phase 7 — Email Notifications**
-Send optional email reminders for race sessions and favourite-driver updates using a provider such as Resend or SendGrid.
+**Phase 7 — Email Notifications** *(complete)*
+Opt-in email preferences, Resend integration, test email endpoint, due-reminder delivery service, CLI script, and a frontend Settings page for managing preferences.
 
 **Phase 8 — Favourite Driver Notifications**
 Users can favourite a driver and receive personalised alerts for qualifying results, race results, positions gained or lost, and pit stops.
