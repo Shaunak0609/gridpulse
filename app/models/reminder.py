@@ -16,5 +16,9 @@ class Reminder(Base):
     sent = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Email delivery tracking
+    email_sent = Column(Boolean, nullable=False, server_default="false")
+    email_sent_at = Column(DateTime(timezone=True), nullable=True)
+
     user = relationship("User", backref="reminders")
     race = relationship("Race", backref="reminders")
