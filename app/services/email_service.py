@@ -23,9 +23,12 @@ def send_email(to: str, subject: str, body: str) -> None:
             "EMAIL_FROM is not set. Add it to your .env file."
         )
 
-    resend.Emails.send({
-        "from": EMAIL_FROM,
-        "to": [to],
-        "subject": subject,
-        "text": body,
-    })
+    try:
+        resend.Emails.send({
+            "from": EMAIL_FROM,
+            "to": [to],
+            "subject": subject,
+            "text": body,
+        })
+    except Exception as e:
+        raise RuntimeError(f"Resend could not deliver the email: {e}") from e
