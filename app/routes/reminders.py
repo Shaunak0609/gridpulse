@@ -17,6 +17,17 @@ def create_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if body.race_id is not None:
+        existing = db.query(Reminder).filter(
+            Reminder.user_id == current_user.id,
+            Reminder.race_id == body.race_id,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You already have a reminder for this race.",
+            )
+
     reminder = Reminder(
         user_id=current_user.id,
         race_id=body.race_id,

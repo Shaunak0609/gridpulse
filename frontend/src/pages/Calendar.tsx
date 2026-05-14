@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getCalendar, createReminder } from '../services/api'
+import { getCalendar, getReminders, createReminder } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type { Race } from '../types'
 
@@ -25,11 +25,11 @@ function isNext(race: Race, allRaces: Race[]): boolean {
 
 type ReminderStatus = 'idle' | 'loading' | 'success' | 'error'
 
-function RaceRow({ race, allRaces }: { race: Race; allRaces: Race[] }) {
+function RaceRow({ race, allRaces, hasReminder }: { race: Race; allRaces: Race[]; hasReminder: boolean }) {
   const { isAuthenticated, token } = useAuth()
   const past = isPast(race.start_date)
   const next = isNext(race, allRaces)
-  const [reminderStatus, setReminderStatus] = useState<ReminderStatus>('idle')
+  const [reminderStatus, setReminderStatus] = useState<ReminderStatus>(hasReminder ? 'success' : 'idle')
   const [reminderError, setReminderError] = useState<string | null>(null)
 
   async function handleAddReminder() {
@@ -124,9 +124,11 @@ function SkeletonRow() {
 }
 
 export default function Calendar() {
+  const { token } = useAuth()
   const [races, setRaces] = useState<Race[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [remindedRaceIds, setRemindedRaceIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     getCalendar()
@@ -134,6 +136,16 @@ export default function Calendar() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!token) return
+    getReminders(token)
+      .then(reminders => {
+        const ids = new Set(reminders.map(r => r.race_id).filter((id): id is number => id !== null))
+        setRemindedRaceIds(ids)
+      })
+      .catch(() => {})
+  }, [token])
 
   return (
     <div className="page-enter">
@@ -154,7 +166,7 @@ export default function Calendar() {
         )}
 
         {races && races.map(race => (
-          <RaceRow key={race.id} race={race} allRaces={races} />
+          <RaceRow key={race.id} race={race} allRaces={races} hasReminder={remindedRaceIds.has(race.id)} />
         ))}
       </div>
     </div>
