@@ -1,4 +1,4 @@
-import type { AuthUser, Driver, DriverStanding, EmailPreferences, LoginPayload, Notification, Race, Reminder, ReminderCreate, SignupPayload, Team, TokenResponse } from '../types'
+import type { AuthUser, Driver, DriverStanding, EmailPreferences, LoginPayload, Notification, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -33,6 +33,14 @@ export const getDriver = (id: number) => get<Driver>(`/drivers/${id}`)
 export const getTeams = () => get<Team[]>('/teams')
 export const getCalendar = () => get<Race[]>('/calendar')
 export const getDriverStandings = () => get<DriverStanding[]>('/standings/drivers')
+
+// ─── Session endpoints ───────────────────────────────────────────────────────
+
+export const getUpcomingSessions = (limit = 10) =>
+  get<Session[]>(`/sessions/upcoming?limit=${limit}`)
+
+export const getRaceSessions = (raceId: number) =>
+  get<Session[]>(`/races/${raceId}/sessions`)
 
 // ─── Auth endpoints ──────────────────────────────────────────────────────────
 

@@ -8,16 +8,24 @@ from app.services.email_service import send_email
 
 
 def _build_body(reminder: Reminder) -> str:
-    race_name = reminder.race.name if reminder.race else reminder.title
     username = reminder.user.username or reminder.user.email
     when = (
         reminder.reminder_time.strftime("%-d %B %Y at %H:%M UTC")
         if reminder.reminder_time
         else "soon"
     )
+
+    if reminder.session_id and reminder.session:
+        session_name = reminder.session.session_name
+        race_name = reminder.race.name if reminder.race else "the race weekend"
+        event_line = f"This is your GridPulse reminder for {session_name} at the {race_name}."
+    else:
+        race_name = reminder.race.name if reminder.race else reminder.title
+        event_line = f"This is your GridPulse reminder for the {race_name}."
+
     return (
         f"Hi {username},\n\n"
-        f"This is your GridPulse reminder for the {race_name}.\n\n"
+        f"{event_line}\n\n"
         f"You set this reminder for: {when}\n\n"
         f"Head to GridPulse to check the latest standings and calendar.\n\n"
         f"— The GridPulse team\n\n"
@@ -50,11 +58,16 @@ def process_due_reminders(db: Session) -> dict:
     failed = 0
 
     for reminder in due:
-        race_label = reminder.race.name if reminder.race else reminder.title
+        if reminder.session_id and reminder.session:
+            race_label = reminder.race.name if reminder.race else "Race Weekend"
+            subject = f"GridPulse Reminder: {reminder.session.session_name} – {race_label}"
+        else:
+            race_label = reminder.race.name if reminder.race else reminder.title
+            subject = f"GridPulse Reminder: {race_label}"
         try:
             send_email(
                 to=reminder.user.email,
-                subject=f"GridPulse Reminder: {race_label}",
+                subject=subject,
                 body=_build_body(reminder),
             )
             reminder.email_sent = True

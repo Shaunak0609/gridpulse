@@ -5,6 +5,7 @@ from app.auth.dependencies import get_current_user
 from app.database.database import get_db
 from app.models.notification import Notification
 from app.models.reminder import Reminder
+from app.models.session import Session as RaceSession
 from app.models.user import User
 from app.schemas.reminder import ReminderCreate, ReminderResponse
 
@@ -17,10 +18,33 @@ def create_reminder(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if body.race_id is not None:
+    # --- Resolve session_id and auto-populate race_id from session ---
+    resolved_race_id = body.race_id
+    if body.session_id is not None:
+        session = db.query(RaceSession).filter(RaceSession.id == body.session_id).first()
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session with id {body.session_id} not found.",
+            )
+        resolved_race_id = session.race_id
+
+    # --- Duplicate check ---
+    if body.session_id is not None:
         existing = db.query(Reminder).filter(
             Reminder.user_id == current_user.id,
-            Reminder.race_id == body.race_id,
+            Reminder.session_id == body.session_id,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You already have a reminder for this session.",
+            )
+    elif resolved_race_id is not None:
+        existing = db.query(Reminder).filter(
+            Reminder.user_id == current_user.id,
+            Reminder.race_id == resolved_race_id,
+            Reminder.session_id == None,    # noqa: E711
         ).first()
         if existing:
             raise HTTPException(
@@ -30,7 +54,8 @@ def create_reminder(
 
     reminder = Reminder(
         user_id=current_user.id,
-        race_id=body.race_id,
+        race_id=resolved_race_id,
+        session_id=body.session_id,
         title=body.title,
         reminder_time=body.reminder_time,
     )
@@ -41,7 +66,7 @@ def create_reminder(
         type="reminder_created",
         title="Reminder created",
         message=f'Your reminder "{body.title}" has been set.',
-        related_race_id=body.race_id,
+        related_race_id=resolved_race_id,
     )
     db.add(notification)
 

@@ -10,11 +10,29 @@ function formatDateTime(dateStr: string): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  })
+    timeZone: 'UTC',
+  }) + ' UTC'
 }
 
 function isUpcoming(dateStr: string): boolean {
   return new Date(dateStr) > new Date()
+}
+
+// Derive a short session label and dot colour from the reminder title.
+// Titles for session reminders follow the format "Race Name – Session Name".
+function getSessionLabel(title: string): string {
+  const parts = title.split(' – ')
+  return parts.length > 1 ? parts[parts.length - 1] : title
+}
+
+const SESSION_DOT_COLORS: Record<string, string> = {
+  'Practice 1':        'bg-slate-500',
+  'Practice 2':        'bg-slate-500',
+  'Practice 3':        'bg-slate-500',
+  'Sprint Qualifying': 'bg-orange-500',
+  'Sprint':            'bg-orange-500',
+  'Qualifying':        'bg-yellow-500',
+  'Race':              'bg-red-500',
 }
 
 function ReminderRow({
@@ -26,6 +44,15 @@ function ReminderRow({
 }) {
   const [deleting, setDeleting] = useState(false)
   const upcoming = isUpcoming(reminder.reminder_time)
+  const isSession = reminder.session_id !== null
+  const sessionLabel = isSession ? getSessionLabel(reminder.title) : null
+  const dotColor = reminder.sent
+    ? 'bg-gray-700'
+    : isSession
+    ? (SESSION_DOT_COLORS[sessionLabel ?? ''] ?? 'bg-gray-500')
+    : upcoming
+    ? 'bg-red-500'
+    : 'bg-gray-700'
 
   async function handleDelete() {
     setDeleting(true)
@@ -38,23 +65,28 @@ function ReminderRow({
         ${upcoming ? 'hover:bg-gray-800/50' : 'opacity-50'}`}
     >
       {/* Status dot */}
-      <span
-        className={`w-2 h-2 rounded-full shrink-0 ${
-          reminder.sent
-            ? 'bg-gray-600'
-            : upcoming
-            ? 'bg-red-500'
-            : 'bg-gray-600'
-        }`}
-      />
+      <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
 
       {/* Reminder info */}
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-sm text-white truncate">{reminder.title}</p>
-        <p className="text-gray-500 text-xs mt-0.5 font-mono">
-          {formatDateTime(reminder.reminder_time)}
-        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <p className="text-gray-500 text-xs font-mono">
+            {formatDateTime(reminder.reminder_time)}
+          </p>
+        </div>
       </div>
+
+      {/* Type badge */}
+      {isSession && sessionLabel ? (
+        <span className="text-xs text-gray-500 border border-gray-800 px-2 py-0.5 rounded-full shrink-0 hidden sm:inline">
+          {sessionLabel}
+        </span>
+      ) : reminder.race_id && !isSession ? (
+        <span className="text-xs text-gray-600 border border-gray-800 px-2 py-0.5 rounded-full shrink-0 hidden sm:inline">
+          Race
+        </span>
+      ) : null}
 
       {/* Sent badge */}
       {reminder.sent && (

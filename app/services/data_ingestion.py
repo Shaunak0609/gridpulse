@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.models.driver import Driver
 from app.models.race import Race
+from app.models.session import Session as RaceSession
 from app.models.standing import DriverStanding
 from app.models.team import Team
 from app.services.f1_api_client import (
@@ -12,6 +13,30 @@ from app.services.f1_api_client import (
     fetch_driver_standings,
     fetch_race_calendar,
 )
+
+# Maps Jolpica race dict keys to (session_type, session_name).
+# Order matters: Sprint must come before Qualifying so the sprint weekend
+# session set is recognised correctly.
+_SESSION_KEY_MAP = [
+    ("FirstPractice",    "fp1",               "Practice 1"),
+    ("SecondPractice",   "fp2",               "Practice 2"),
+    ("ThirdPractice",    "fp3",               "Practice 3"),
+    ("SprintShootout",   "sprint_qualifying", "Sprint Qualifying"),
+    ("SprintQualifying", "sprint_qualifying", "Sprint Qualifying"),
+    ("Sprint",           "sprint",            "Sprint"),
+    ("Qualifying",       "qualifying",        "Qualifying"),
+]
+
+
+def _parse_session_time(date_str: str | None, time_str: str | None) -> datetime | None:
+    if not date_str:
+        return None
+    if time_str:
+        iso = f"{date_str}T{time_str.replace('Z', '+00:00')}"
+        return datetime.fromisoformat(iso)
+    # Date only — store midnight UTC so the value is still useful for ordering.
+    d = date.fromisoformat(date_str)
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 
 def sync_teams(db: Session) -> bool:
@@ -256,13 +281,89 @@ def sync_driver_standings(db: Session) -> bool:
         return False
 
 
+def sync_sessions(db: Session) -> bool:
+    print("\n[Sessions]")
+
+    try:
+        races = fetch_race_calendar()
+    except RuntimeError as e:
+        print(f"  ERROR fetching race calendar for sessions: {e}")
+        return False
+
+    if not races:
+        print("  WARNING: Jolpica returned 0 races. Nothing to sync.")
+        return False
+
+    inserted = 0
+    updated = 0
+
+    try:
+        for race_data in races:
+            season = int(race_data["season"])
+            round_num = int(race_data["round"])
+
+            race = db.query(Race).filter(
+                Race.season == season,
+                Race.round == round_num,
+            ).first()
+
+            if not race:
+                print(f"  WARNING: Race not found for season={season} round={round_num}. Run calendar sync first.")
+                continue
+
+            # Build the list of (session_type, session_name, start_time) for this race.
+            sessions_to_sync: list[tuple[str, str, datetime | None]] = []
+
+            for jolpica_key, session_type, session_name in _SESSION_KEY_MAP:
+                sub = race_data.get(jolpica_key)
+                if sub:
+                    start_time = _parse_session_time(sub.get("date"), sub.get("time"))
+                    sessions_to_sync.append((session_type, session_name, start_time))
+
+            # Race session — top-level date/time fields.
+            race_start = _parse_session_time(race_data.get("date"), race_data.get("time"))
+            sessions_to_sync.append(("race", "Race", race_start))
+
+            for session_type, session_name, start_time in sessions_to_sync:
+                existing = db.query(RaceSession).filter_by(
+                    race_id=race.id,
+                    session_type=session_type,
+                ).first()
+
+                if existing:
+                    existing.session_name = session_name
+                    existing.start_time = start_time
+                    updated += 1
+                else:
+                    db.add(RaceSession(
+                        race_id=race.id,
+                        session_type=session_type,
+                        session_name=session_name,
+                        start_time=start_time,
+                        end_time=None,
+                        timezone=None,
+                    ))
+                    inserted += 1
+
+        db.commit()
+        print(f"  OK — {inserted} inserted, {updated} updated.")
+        return True
+
+    except Exception as e:
+        db.rollback()
+        print(f"  ERROR saving sessions to database: {e}")
+        return False
+
+
 def sync_all(db: Session) -> None:
     print(f"=== GridPulse F1 Data Sync — {SEASON} season ===")
 
+    # Sessions must run after Race Calendar so race rows already exist.
     results = {
         "Teams":            sync_teams(db),
         "Drivers":          sync_drivers(db),
         "Race Calendar":    sync_race_calendar(db),
+        "Sessions":         sync_sessions(db),
         "Driver Standings": sync_driver_standings(db),
     }
 

@@ -5,3 +5,6 @@ from app.models.standing import DriverStanding
 from app.models.user import User
 from app.models.reminder import Reminder
 from app.models.notification import Notification
+from app.models.session import Session
+from app.models.favorite_driver import FavoriteDriver
+from app.models.favorite_team import FavoriteTeam

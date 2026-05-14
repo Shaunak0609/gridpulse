@@ -59,10 +59,21 @@ export interface TokenResponse {
   token_type: string
 }
 
+export interface Session {
+  id: number
+  race_id: number
+  session_type: string
+  session_name: string
+  start_time: string | null
+  end_time: string | null
+  timezone: string | null
+}
+
 export interface Reminder {
   id: number
   user_id: number
   race_id: number | null
+  session_id: number | null
   title: string
   reminder_time: string
   sent: boolean
@@ -73,6 +84,7 @@ export interface ReminderCreate {
   title: string
   reminder_time: string
   race_id?: number
+  session_id?: number
 }
 
 export interface EmailPreferences {

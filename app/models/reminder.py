@@ -20,5 +20,8 @@ class Reminder(Base):
     email_sent = Column(Boolean, nullable=False, server_default="false")
     email_sent_at = Column(DateTime(timezone=True), nullable=True)
 
+    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
+
     user = relationship("User", backref="reminders")
     race = relationship("Race", backref="reminders")
+    session = relationship("Session", backref="reminders")

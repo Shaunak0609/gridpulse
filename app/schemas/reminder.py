@@ -7,12 +7,14 @@ class ReminderCreate(BaseModel):
     title: str
     reminder_time: datetime
     race_id: int | None = None
+    session_id: int | None = None
 
 
 class ReminderResponse(BaseModel):
     id: int
     user_id: int
     race_id: int | None
+    session_id: int | None
     title: str
     reminder_time: datetime
     sent: bool

@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 7
+## Current Status — Phase 7.5
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -100,6 +100,23 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend `/settings` page — email preference toggles with optimistic UI updates; "Send test email" button visible when the master switch is on; requires login
 - Navbar — Settings link visible only when logged in
 
+### Phase 7.5 — Session Schedule Support (complete)
+
+- `sessions` table — stores individual sessions per race (Practice 1–3, Qualifying, Sprint, Race) with `session_type`, `session_name`, `start_time`, `end_time`, and `timezone`
+- Unique constraint on `(race_id, session_type)` — sync is safe to run multiple times without creating duplicate sessions
+- `session_id` nullable foreign key added to the `reminders` table — allows a reminder to target a specific session rather than just a race weekend
+- `GET /races/{race_id}/sessions` — returns all sessions for a race, ordered by start time (public)
+- `GET /sessions/upcoming` — returns the next N upcoming sessions for the current season, ordered by start time (public, default limit 10)
+- `ReminderCreate` and `ReminderResponse` updated to accept and return optional `session_id`
+- When `session_id` is provided, the backend validates the session exists and auto-populates `race_id` from the session — no mismatch possible
+- Duplicate check is session-aware: one reminder per `(user_id, session_id)` for session reminders, one per `(user_id, race_id)` for race reminders
+- Due-reminder email service (`reminder_email_service.py`) updated — session reminders produce a more specific subject and body: `"Qualifying – Australian Grand Prix"` instead of just the race name
+- Frontend Calendar page — each race row has a chevron to expand a session panel; sessions load on demand (lazy fetch); each upcoming session shows a `+ Remind` button
+- Session reminder buttons are colour-coded by type: slate for practice, amber for qualifying, orange for sprint sessions, red for race
+- Pre-load check on Calendar page load — session reminder buttons show "Reminder set ✓" immediately if a reminder already exists
+- Frontend Reminders page — session reminders show a session-type badge (e.g. "Qualifying") and a colour-coded dot; race reminders show a "Race" badge
+- `scripts/seed_sessions.py` — seeds five standard sessions per race derived from each race's `start_date`; safe to run multiple times
+
 ---
 
 ## Tech Stack
@@ -163,16 +180,18 @@ gridpulse/
 │   │   ├── race.py
 │   │   ├── standing.py
 │   │   ├── user.py               # User model (Phase 4)
-│   │   ├── reminder.py           # Reminder model (Phase 6)
-│   │   └── notification.py       # Notification model (Phase 6)
+│   │   ├── reminder.py           # Reminder model — race_id + session_id (Phase 6/7.5)
+│   │   ├── notification.py       # Notification model (Phase 6)
+│   │   └── session.py            # Session model (Phase 7.5)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
 │   │   ├── race.py
 │   │   ├── standing.py
 │   │   ├── user.py               # UserCreate, UserLogin, UserResponse, Token
-│   │   ├── reminder.py           # ReminderCreate, ReminderResponse (Phase 6)
-│   │   └── notification.py       # NotificationResponse (Phase 6)
+│   │   ├── reminder.py           # ReminderCreate/Response with optional session_id (Phase 6/7.5)
+│   │   ├── notification.py       # NotificationResponse (Phase 6)
+│   │   └── session.py            # SessionCreate, SessionResponse (Phase 7.5)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -181,23 +200,27 @@ gridpulse/
 │   │   ├── teams.py
 │   │   ├── calendar.py
 │   │   ├── standings.py
-│   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6)
+│   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
 │   │   ├── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
-│   │   └── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
+│   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
+│   │   └── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
 │   │   ├── email_service.py      # Resend wrapper (Phase 7)
-│   │   └── reminder_email_service.py  # due-reminder delivery logic (Phase 7)
+│   │   └── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
-│   ├── create_tables.py          # creates tables in PostgreSQL
+│   ├── create_tables.py          # creates all tables including sessions
 │   ├── seed.py                   # inserts small local sample data (Phase 1)
 │   ├── sync_f1_data.py           # fetches and stores real F1 data from Jolpica
-│   ├── migrate_add_email_preferences.py       # adds email preference columns to users (Phase 7)
-│   ├── migrate_add_reminder_email_tracking.py # adds email_sent columns to reminders (Phase 7)
-│   └── send_due_reminder_emails.py            # CLI script to send due reminder emails (Phase 7)
+│   ├── seed_sessions.py          # seeds 5 standard sessions per race (Phase 7.5)
+│   ├── migrate_add_email_preferences.py        # adds email preference columns to users (Phase 7)
+│   ├── migrate_add_reminder_email_tracking.py  # adds email_sent columns to reminders (Phase 7)
+│   ├── migrate_create_sessions_table.py        # creates sessions table (Phase 7.5)
+│   ├── migrate_add_reminder_session_id.py      # adds session_id to reminders (Phase 7.5)
+│   └── send_due_reminder_emails.py             # CLI script to send due reminder emails (Phase 7)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
 └── requirements.txt
@@ -488,6 +511,8 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/teams` | List all 10 teams |
 | GET | `/calendar` | Race calendar for the configured season |
 | GET | `/standings/drivers` | Driver championship standings |
+| GET | `/races/{race_id}/sessions` | All sessions for a specific race, ordered by start time |
+| GET | `/sessions/upcoming` | Next N upcoming sessions for the current season (default 10, max 50) |
 
 ### Authentication endpoints
 
@@ -507,8 +532,8 @@ All reminder endpoints require a valid JWT Bearer token. Requests without a toke
 
 | Method | Endpoint | Auth required | Description |
 |---|---|---|---|
-| POST | `/reminders` | Yes — Bearer token | Create a reminder; also creates a notification |
-| GET | `/reminders` | Yes — Bearer token | List the current user's reminders |
+| POST | `/reminders` | Yes — Bearer token | Create a reminder; accepts optional `session_id` for session-level reminders |
+| GET | `/reminders` | Yes — Bearer token | List the current user's reminders; includes `session_id` in response |
 | DELETE | `/reminders/{id}` | Yes — Bearer token | Delete a reminder by ID |
 
 ### Notification endpoints
@@ -775,11 +800,77 @@ Make sure `RESEND_API_KEY` and `EMAIL_FROM` are set in your `.env` file before t
 
 ---
 
+## Session Schedule Setup and Testing
+
+### Create the sessions table
+
+If you have an existing database (already has races, users, reminders), run the migration:
+
+```bash
+python scripts/migrate_create_sessions_table.py
+python scripts/migrate_add_reminder_session_id.py
+```
+
+Both scripts use `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` and are safe to run more than once.
+
+If you are setting up a fresh database, `create_tables.py` creates the `sessions` table automatically — no migration scripts needed.
+
+### Seed session data
+
+After the table exists and races are synced, seed five standard sessions per race:
+
+```bash
+python scripts/seed_sessions.py
+```
+
+Expected output (24 races × 5 sessions):
+```
+Found 24 race(s). Seeding sessions...
+Done. 120 session(s) inserted, 0 already existed.
+```
+
+Running it again produces:
+```
+Done. 0 session(s) inserted, 120 already existed.
+```
+
+Session times are derived from each race's `start_date`:
+- Practice 1 — Friday 10:30 UTC
+- Practice 2 — Friday 14:00 UTC
+- Practice 3 — Saturday 11:30 UTC
+- Qualifying — Saturday 15:00 UTC
+- Race — Sunday 13:00 UTC
+
+These are approximations. Once real session times are synced from Jolpica or another source, the seed values can be replaced with a re-run of the sync.
+
+### Test session endpoints in API docs
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Open `http://127.0.0.1:8000/docs`
+3. Call `GET /races/1/sessions` — you should see 5 sessions for round 1, ordered by start time
+4. Call `GET /sessions/upcoming` — next 10 sessions with a future `start_time` are returned
+5. Call `GET /sessions/upcoming?limit=3` — returns exactly 3 sessions
+6. Call `GET /races/9999/sessions` — you should get a `404` response
+
+### Test session reminders in the frontend
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and go to `/calendar`
+3. Click the chevron `›` on any upcoming race row — five sessions appear beneath it
+4. Click `+ Remind` on Practice 1 — button shows "Adding…" then "Reminder set ✓"
+5. Click `+ Remind` on Qualifying (same race) — sets independently
+6. Click `+ Remind` on Practice 1 again — backend returns `409`; button shows the error
+7. Go to `/reminders` — both session reminders appear with session-type badges and colour-coded dots
+8. Reload `/calendar` and expand the same race — both session buttons already show "Reminder set ✓"
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
-- Favourite drivers or teams
+- Favourite drivers or teams (planned for Phase 8)
+- Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times from the API will be added in a future sync update
 - Favourite-driver email alerts (preference toggle exists; delivery logic is not yet built)
 - Push notifications
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
@@ -817,6 +908,9 @@ Signed-in users can set reminders for upcoming races from the Calendar page. Rem
 
 **Phase 7 — Email Notifications** *(complete)*
 Opt-in email preferences, Resend integration, test email endpoint, due-reminder delivery service, CLI script, and a frontend Settings page for managing preferences.
+
+**Phase 7.5 — Session Schedule Support** *(complete)*
+Sessions table and model for FP1–FP3, Sprint, Qualifying, and Race. Session-aware reminders, session endpoints, Calendar page session panels with per-session reminder buttons, and session-specific email bodies.
 
 **Phase 8 — Favourite Driver Notifications**
 Users can favourite a driver and receive personalised alerts for qualifying results, race results, positions gained or lost, and pit stops.
