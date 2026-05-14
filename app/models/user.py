@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, DateTime
 from sqlalchemy.sql import func
 
 from app.database.database import Base
@@ -20,3 +20,8 @@ class User(Base):
     # Google's unique, permanent identifier for a user (the "sub" field in the ID token)
     google_sub = Column(String, unique=True, nullable=True, index=True)
     profile_picture_url = Column(String, nullable=True)
+
+    # Email notification preferences — all default to False (opt-in)
+    email_notifications_enabled = Column(Boolean, nullable=False, server_default="false")
+    calendar_email_reminders_enabled = Column(Boolean, nullable=False, server_default="false")
+    favorite_driver_email_alerts_enabled = Column(Boolean, nullable=False, server_default="false")

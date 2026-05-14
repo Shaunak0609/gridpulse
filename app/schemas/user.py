@@ -27,3 +27,17 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class EmailPreferencesResponse(BaseModel):
+    email_notifications_enabled: bool
+    calendar_email_reminders_enabled: bool
+    favorite_driver_email_alerts_enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class EmailPreferencesUpdate(BaseModel):
+    email_notifications_enabled: bool | None = None
+    calendar_email_reminders_enabled: bool | None = None
+    favorite_driver_email_alerts_enabled: bool | None = None
