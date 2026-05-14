@@ -1,7 +1,8 @@
+import os
 import requests
 
 BASE_URL = "https://api.jolpi.ca/ergast/f1"
-SEASON = 2025
+SEASON = int(os.getenv("F1_SEASON", "2026"))
 
 
 def _get(url: str) -> dict:

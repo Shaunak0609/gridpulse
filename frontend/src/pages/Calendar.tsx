@@ -139,7 +139,7 @@ export default function Calendar() {
     <div className="page-enter">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Race Calendar</h1>
-        <p className="text-gray-400 mt-1">The full 2025 Formula 1 season schedule.</p>
+        <p className="text-gray-400 mt-1">The full 2026 Formula 1 season schedule.</p>
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">

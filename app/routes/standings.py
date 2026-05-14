@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -7,10 +9,17 @@ from app.schemas.standing import DriverStandingSchema
 
 router = APIRouter()
 
+SEASON = int(os.getenv("F1_SEASON", "2026"))
+
 
 @router.get("/standings/drivers", response_model=list[DriverStandingSchema])
 def get_driver_standings(db: Session = Depends(get_db)):
-    standings = db.query(DriverStanding).order_by(DriverStanding.position).all()
+    standings = (
+        db.query(DriverStanding)
+        .filter(DriverStanding.season == SEASON)
+        .order_by(DriverStanding.position)
+        .all()
+    )
     return [
         {
             "position": s.position,

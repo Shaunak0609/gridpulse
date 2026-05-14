@@ -42,7 +42,7 @@ export default function Teams() {
     <div className="page-enter">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Teams</h1>
-        <p className="text-gray-400 mt-1">All 10 constructors on the 2025 Formula 1 grid.</p>
+        <p className="text-gray-400 mt-1">All 11 constructors on the 2026 Formula 1 grid.</p>
       </div>
 
       {loading && (

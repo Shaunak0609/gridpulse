@@ -22,7 +22,7 @@ This repository contains the backend API built with Python and FastAPI.
 - Jolpica F1 API client for fetching external data
 - Data ingestion service that maps API responses to database models
 - Upsert logic — safe to sync multiple times without creating duplicates
-- Manual sync script to pull and store real 2025 F1 data
+- Manual sync script to pull and store real F1 data for the configured season
 - All endpoints now serve real data from the database
 
 ### Phase 3 — Frontend Foundation + Multi-Page UI (complete)
@@ -111,9 +111,9 @@ Jolpica is a free, public Formula 1 data API. No API key is required. GridPulse 
 
 | Data | Jolpica endpoint |
 |---|---|
-| Race calendar | `/2025/races.json` |
-| Driver standings | `/2025/driverStandings.json` |
-| Constructor standings | `/2025/constructorStandings.json` |
+| Race calendar | `/{season}/races.json` |
+| Driver standings | `/{season}/driverStandings.json` |
+| Constructor standings | `/{season}/constructorStandings.json` |
 
 Data is fetched manually and stored in PostgreSQL. The app serves data from its own database, not directly from Jolpica on every request.
 
@@ -243,6 +243,8 @@ GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
 FRONTEND_URL=http://localhost:5173
+
+F1_SEASON=2026
 ```
 
 Replace `your_username` and `your_password` with your actual PostgreSQL credentials. Your username is usually your Mac username — run `whoami` in the terminal if you are unsure.
@@ -283,27 +285,27 @@ Done. Tables created:
 python scripts/sync_f1_data.py
 ```
 
-This fetches real 2025 F1 data from the Jolpica API and stores it in your database. An internet connection is required.
+This fetches F1 data for the season set in `F1_SEASON` (default: 2026) from the Jolpica API and stores it in your database. An internet connection is required.
 
 Expected output:
 
 ```
-=== GridPulse F1 Data Sync — 2025 season ===
+=== GridPulse F1 Data Sync — 2026 season ===
 
 [Teams]
-  Fetching: https://api.jolpi.ca/ergast/f1/2025/constructorStandings.json
+  Fetching: https://api.jolpi.ca/ergast/f1/2026/constructorStandings.json
   OK — 10 inserted, 0 updated.
 
 [Drivers]
-  Fetching: https://api.jolpi.ca/ergast/f1/2025/driverStandings.json
+  Fetching: https://api.jolpi.ca/ergast/f1/2026/driverStandings.json
   OK — 20 inserted, 0 updated, 0 skipped.
 
 [Race Calendar]
-  Fetching: https://api.jolpi.ca/ergast/f1/2025/races.json?limit=100
+  Fetching: https://api.jolpi.ca/ergast/f1/2026/races.json?limit=100
   OK — 24 inserted, 0 updated.
 
 [Driver Standings]
-  Fetching: https://api.jolpi.ca/ergast/f1/2025/driverStandings.json
+  Fetching: https://api.jolpi.ca/ergast/f1/2026/driverStandings.json
   OK — 20 inserted, 0 updated, 0 skipped.
 
 === Sync Summary ===
@@ -375,6 +377,34 @@ ORDER BY s.position;
 
 ---
 
+## Changing the F1 Season
+
+The season GridPulse syncs is controlled by the `F1_SEASON` variable in your `.env` file. The default is `2026`.
+
+To switch to a different season:
+
+1. Open your `.env` file and change the value:
+   ```
+   F1_SEASON=2025
+   ```
+2. Run the sync script:
+   ```bash
+   python scripts/sync_f1_data.py
+   ```
+   The script will fetch data for the new season and upsert it into the database. Existing rows for other seasons are not deleted — the database can hold multiple seasons at once.
+
+3. Restart the backend so the updated season is in effect:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+**Notes:**
+- Jolpica only has complete data for seasons that have started. Requesting a future season that has no data yet will return empty results and the sync will warn you.
+- The standings endpoint (`GET /standings/drivers`) queries the database for whichever season's data was most recently synced. If you sync a new season, standings will update automatically on the next request.
+- The calendar endpoint (`GET /calendar`) returns all races in the database across all seasons. To limit to one season, that filtering can be added in a future phase.
+
+---
+
 ## Google OAuth Setup
 
 Google sign-in requires a one-time manual setup in Google Cloud Console.
@@ -421,7 +451,7 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/drivers` | List all 20 drivers |
 | GET | `/drivers/{id}` | Get a single driver by ID |
 | GET | `/teams` | List all 10 teams |
-| GET | `/calendar` | Full 2025 race calendar |
+| GET | `/calendar` | Race calendar for the configured season |
 | GET | `/standings/drivers` | Driver championship standings |
 
 ### Authentication endpoints
@@ -531,12 +561,12 @@ Note: `base` is `null` — the Jolpica constructor standings endpoint does not i
 [
   {
     "id": 1,
-    "season": 2025,
+    "season": 2026,
     "round": 1,
     "name": "Australian Grand Prix",
     "circuit_name": "Albert Park Grand Prix Circuit",
     "country": "Australia",
-    "start_date": "2025-03-16"
+    "start_date": "2026-03-15"
   }
 ]
 ```

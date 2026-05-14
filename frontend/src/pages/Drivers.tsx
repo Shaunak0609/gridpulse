@@ -52,7 +52,7 @@ export default function Drivers() {
     <div className="page-enter">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Drivers</h1>
-        <p className="text-gray-400 mt-1">All 2025 Formula 1 drivers.</p>
+        <p className="text-gray-400 mt-1">All 2026 Formula 1 drivers.</p>
       </div>
 
       {loading && (

@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom'
 
 const sections = [
-  { to: '/drivers', label: 'Drivers', description: 'All 20 drivers on the 2025 grid.' },
-  { to: '/teams', label: 'Teams', description: 'All 10 constructors competing in 2025.' },
-  { to: '/calendar', label: 'Calendar', description: 'The full 24-race 2025 season schedule.' },
+  { to: '/drivers', label: 'Drivers', description: 'All 22 drivers on the 2026 grid.' },
+  { to: '/teams', label: 'Teams', description: 'All 11 constructors competing in 2026.' },
+  { to: '/calendar', label: 'Calendar', description: 'The full 22-race 2026 season schedule.' },
   { to: '/standings', label: 'Standings', description: 'Live driver championship standings.' },
 ]
 
@@ -22,7 +22,7 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-b from-red-950/30 to-transparent pointer-events-none rounded-2xl" />
         {/* z-10 keeps all content above the overlays */}
         <p className="relative z-10 text-red-500 text-xs font-semibold tracking-widest uppercase mb-4">
-          2025 Season
+          2026 Season
         </p>
         <h1 className="relative z-10 text-6xl font-black mb-4 tracking-tight">
           Grid<span className="text-red-500">Pulse</span>

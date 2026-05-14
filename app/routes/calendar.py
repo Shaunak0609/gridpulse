@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -7,10 +9,12 @@ from app.schemas.race import RaceSchema
 
 router = APIRouter()
 
+SEASON = int(os.getenv("F1_SEASON", "2026"))
+
 
 @router.get("/calendar", response_model=list[RaceSchema])
 def get_calendar(db: Session = Depends(get_db)):
-    races = db.query(Race).order_by(Race.round).all()
+    races = db.query(Race).filter(Race.season == SEASON).order_by(Race.round).all()
     return [
         {
             "id": r.id,

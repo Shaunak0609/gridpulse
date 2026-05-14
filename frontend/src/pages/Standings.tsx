@@ -67,7 +67,7 @@ export default function Standings() {
     <div className="page-enter">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white">Driver Standings</h1>
-        <p className="text-gray-400 mt-1">2025 Formula 1 World Championship.</p>
+        <p className="text-gray-400 mt-1">2026 Formula 1 World Championship.</p>
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
