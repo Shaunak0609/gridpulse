@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 7.5
+## Current Status — Phase 8
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -117,6 +117,28 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend Reminders page — session reminders show a session-type badge (e.g. "Qualifying") and a colour-coded dot; race reminders show a "Race" badge
 - `scripts/seed_sessions.py` — seeds five standard sessions per race derived from each race's `start_date`; safe to run multiple times
 
+### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
+
+- `favorite_drivers` table — stores one row per `(user_id, driver_id)` pair; unique constraint `uq_favorite_driver_user` prevents duplicate favourites
+- `favorite_teams` table — same pattern with `(user_id, team_id)` and unique constraint `uq_favorite_team_user`
+- `FavoriteDriver` and `FavoriteTeam` SQLAlchemy models with relationships to `User`, `Driver`, and `Team`
+- Nested Pydantic schemas: `FavoriteDriverResponse` embeds a full `FavoriteDriverInfo` (including the driver's team as `FavoriteTeamInfo`); `FavoriteTeamResponse` embeds `FavoriteTeamInfo`
+- `GET /me/favorites/drivers` — returns the current user's favourite drivers, ordered by when they were added (protected)
+- `POST /me/favorites/drivers/{driver_id}` — favourites a driver; returns `404` if the driver does not exist, `409` if already favourited (protected)
+- `DELETE /me/favorites/drivers/{driver_id}` — removes a favourite driver; returns `404` if not in the user's list (protected)
+- `GET /me/favorites/teams` — returns the current user's favourite teams, ordered by when they were added (protected)
+- `POST /me/favorites/teams/{team_id}` — favourites a team; returns `404` if the team does not exist, `409` if already favourited (protected)
+- `DELETE /me/favorites/teams/{team_id}` — removes a favourite team; returns `404` if not in the user's list (protected)
+- `GET /me/dashboard` — returns a personalised summary in one request: user profile, favourite drivers (with nested team info), favourite teams, next 5 upcoming sessions, next 5 upcoming reminders, 5 most recent notifications (protected)
+- Frontend favourite API functions: `getFavoriteDrivers`, `addFavoriteDriver`, `removeFavoriteDriver`, `getFavoriteTeams`, `addFavoriteTeam`, `removeFavoriteTeam`, `getDashboard`
+- Driver Detail page — star button appears for logged-in users; initial state loaded from `GET /me/favorites/drivers` on mount; toggles between ☆ Add to Favourites and ★ Favourited; logged-out users see a styled "Log in to favourite" prompt that matches the button shape
+- Teams page — each team card has an individual star button; initial state is pre-loaded from `GET /me/favorites/teams` on page load; card border turns red when favourited; logged-out users see a "Log in to favourite" prompt per card
+- Dashboard page (`/dashboard`) — protected route; shows six sections: Welcome heading, Favourite Drivers (with driver number and team, links to driver detail pages), Favourite Teams, Upcoming Sessions (colour-coded by session type), Upcoming Reminders, and Recent Notifications (unread highlighted in red)
+- Dashboard link added to the navbar — visible only when logged in
+- All Dashboard sections show informative empty states with dashed-border cards and action links pointing to the relevant page (Drivers, Teams, Calendar) — not blank areas
+- All session and reminder times display in the user's local browser timezone, not hard-coded UTC
+- `scripts/migrate_create_favorites_tables.py` — idempotent migration to add `favorite_drivers` and `favorite_teams` to an existing database; fresh databases use `create_tables.py` directly
+
 ---
 
 ## Tech Stack
@@ -182,7 +204,9 @@ gridpulse/
 │   │   ├── user.py               # User model (Phase 4)
 │   │   ├── reminder.py           # Reminder model — race_id + session_id (Phase 6/7.5)
 │   │   ├── notification.py       # Notification model (Phase 6)
-│   │   └── session.py            # Session model (Phase 7.5)
+│   │   ├── session.py            # Session model (Phase 7.5)
+│   │   ├── favorite_driver.py    # FavoriteDriver model — user/driver join table (Phase 8)
+│   │   └── favorite_team.py      # FavoriteTeam model — user/team join table (Phase 8)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
@@ -191,7 +215,9 @@ gridpulse/
 │   │   ├── user.py               # UserCreate, UserLogin, UserResponse, Token
 │   │   ├── reminder.py           # ReminderCreate/Response with optional session_id (Phase 6/7.5)
 │   │   ├── notification.py       # NotificationResponse (Phase 6)
-│   │   └── session.py            # SessionCreate, SessionResponse (Phase 7.5)
+│   │   ├── session.py            # SessionCreate, SessionResponse (Phase 7.5)
+│   │   ├── favorite.py           # FavoriteDriverResponse, FavoriteTeamResponse + nested info schemas (Phase 8)
+│   │   └── dashboard.py          # DashboardResponse — assembles all sections (Phase 8)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -203,7 +229,9 @@ gridpulse/
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
 │   │   ├── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
-│   │   └── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
+│   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
+│   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
+│   │   └── dashboard.py          # GET /me/dashboard (Phase 8)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
@@ -220,6 +248,7 @@ gridpulse/
 │   ├── migrate_add_reminder_email_tracking.py  # adds email_sent columns to reminders (Phase 7)
 │   ├── migrate_create_sessions_table.py        # creates sessions table (Phase 7.5)
 │   ├── migrate_add_reminder_session_id.py      # adds session_id to reminders (Phase 7.5)
+│   ├── migrate_create_favorites_tables.py      # creates favorite_drivers and favorite_teams tables (Phase 8)
 │   └── send_due_reminder_emails.py             # CLI script to send due reminder emails (Phase 7)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
@@ -546,6 +575,20 @@ All notification endpoints require a valid JWT Bearer token.
 | PUT | `/notifications/{id}/read` | Yes — Bearer token | Mark a notification as read |
 | DELETE | `/notifications/{id}` | Yes — Bearer token | Delete a notification by ID |
 
+### Favourite endpoints
+
+All favourite endpoints require a valid JWT Bearer token. Users can only read and modify their own favourites.
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| GET | `/me/favorites/drivers` | Yes — Bearer token | List the current user's favourite drivers, with nested driver and team info |
+| POST | `/me/favorites/drivers/{driver_id}` | Yes — Bearer token | Favourite a driver; `404` if driver not found; `409` if already favourited |
+| DELETE | `/me/favorites/drivers/{driver_id}` | Yes — Bearer token | Remove a favourite driver; `404` if not in the user's list |
+| GET | `/me/favorites/teams` | Yes — Bearer token | List the current user's favourite teams, with nested team info |
+| POST | `/me/favorites/teams/{team_id}` | Yes — Bearer token | Favourite a team; `404` if team not found; `409` if already favourited |
+| DELETE | `/me/favorites/teams/{team_id}` | Yes — Bearer token | Remove a favourite team; `404` if not in the user's list |
+| GET | `/me/dashboard` | Yes — Bearer token | Personalised summary: user profile, favourite drivers and teams, next 5 sessions, next 5 reminders, 5 most recent notifications |
+
 ### Email endpoints
 
 | Method | Endpoint | Auth required | Description |
@@ -865,13 +908,93 @@ These are approximations. Once real session times are synced from Jolpica or ano
 
 ---
 
+## Testing Favourites and the Dashboard
+
+### Set up the database tables
+
+If you have an existing database (already has users, reminders, sessions), run the migration:
+
+```bash
+python scripts/migrate_create_favorites_tables.py
+```
+
+Expected output:
+```
+Running migration: create favorite_drivers and favorite_teams tables...
+Done. favorite_drivers and favorite_teams tables created (or already existed — safe to run again).
+```
+
+If you are setting up a fresh database, `create_tables.py` creates both tables automatically — no migration needed.
+
+### Test favourites in FastAPI docs
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Open `http://127.0.0.1:8000/docs`
+3. Log in via **POST /auth/login** and copy the `access_token`
+4. Click the **Authorize** padlock at the top right, paste the token, click **Authorize**
+
+**Favourite a driver:**
+
+5. Find **POST /me/favorites/drivers/{driver_id}** → **Try it out**
+6. Enter a valid `driver_id` (e.g. `1`) and click **Execute** — you should get a `201` response with the favourite record including nested driver and team info
+7. Try the same request again — you should get `409 Conflict`: "You have already favourited this driver."
+8. Find **GET /me/favorites/drivers** → **Execute** — your favourited driver should appear in the list
+9. Find **DELETE /me/favorites/drivers/{driver_id}** → enter `1` → **Execute** — you should get `204 No Content`
+10. Call **GET /me/favorites/drivers** again — the list should now be empty
+
+**Favourite a team:**
+
+11. Follow the same steps using `/me/favorites/teams/{team_id}` with a valid `team_id` (e.g. `1`)
+
+**Test the dashboard:**
+
+12. Add one or two favourite drivers and teams (steps above)
+13. Find **GET /me/dashboard** → **Execute** — the response includes `user`, `favorite_drivers`, `favorite_teams`, `upcoming_sessions`, `upcoming_reminders`, and `recent_notifications`
+14. `upcoming_sessions` shows the next 5 sessions from the current season; `upcoming_reminders` shows your next 5 reminders; `recent_notifications` shows the 5 most recent
+
+**Test invalid cases:**
+
+15. Call **POST /me/favorites/drivers/9999** — you should get `404`: "Driver with id 9999 not found."
+16. Call **DELETE /me/favorites/drivers/1** when it is not in your list — you should get `404`: "Favourite not found."
+
+### Test favourites in the frontend
+
+**Driver Detail — favourite a driver:**
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and go to `/drivers`
+3. Click any driver to open their detail page
+4. You should see a `☆ Add to Favourites` button in the top right of the header
+5. Click it — the button briefly shows "Adding…" then switches to `★ Favourited`
+6. Click it again — it shows "Removing…" then returns to `☆ Add to Favourites`
+7. Log out and revisit the same driver page — the button area now shows `☆ Log in to favourite` and the sub-text "Sign in to follow this driver"
+
+**Teams page — favourite a team:**
+
+8. Log in and go to `/teams`
+9. Each team card shows `☆ Log in to favourite` if you are logged out, or `☆ Add to Favourites` if logged in
+10. Click the star on any team card — it briefly shows "Adding…" then `★ Favourited`; the card border turns red
+11. Click again to unfavourite — border returns to grey
+12. Log out and reload `/teams` — every card shows `☆ Log in to favourite` and "Sign in to follow this team"
+
+**Dashboard:**
+
+13. Log in and click **Dashboard** in the navbar
+14. If you have no favourites yet, you should see dashed-border empty state cards with explanatory text and a "Browse …" action button for each favourites section
+15. Favourite one or two drivers and one team, then return to `/dashboard` — the relevant sections fill in with cards
+16. Click a driver card in the Favourite Drivers section — it should link directly to that driver's detail page
+17. Click the "Browse teams →" button in the empty Teams section — it should navigate to `/teams`
+18. Log out and try to navigate to `/dashboard` directly — you should be redirected to `/login`
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
-- Favourite drivers or teams (planned for Phase 8)
+- Favourite-driver notifications — users can already favourite drivers, but there is no alert system yet for qualifying results, race results, or position changes (planned for Phase 9)
 - Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times from the API will be added in a future sync update
-- Favourite-driver email alerts (preference toggle exists; delivery logic is not yet built)
+- Favourite-driver email alerts — the email preference toggle (`favorite_driver_email_alerts_enabled`) already exists but the delivery logic is not yet built
 - Push notifications
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
 - AI features
@@ -912,22 +1035,25 @@ Opt-in email preferences, Resend integration, test email endpoint, due-reminder 
 **Phase 7.5 — Session Schedule Support** *(complete)*
 Sessions table and model for FP1–FP3, Sprint, Qualifying, and Race. Session-aware reminders, session endpoints, Calendar page session panels with per-session reminder buttons, and session-specific email bodies.
 
-**Phase 8 — Favourite Driver Notifications**
-Users can favourite a driver and receive personalised alerts for qualifying results, race results, positions gained or lost, and pit stops.
+**Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard** *(complete)*
+Users can favourite drivers and teams. A protected Dashboard page shows a personalised summary: favourite drivers and teams, upcoming sessions, reminders, and recent notifications. All times display in the user's local timezone.
 
-**Phase 9 — AI Race Assistant**
+**Phase 9 — Favourite Driver Notifications**
+When a user's favourite driver achieves a notable result — qualifying position, race finish, positions gained — GridPulse creates an in-app notification and optionally sends an email alert.
+
+**Phase 10 — AI Race Assistant**
 A protected AI feature for signed-in users. Ask questions about races, drivers, and strategy grounded in real race data.
 
-**Phase 10 — Live Race Dashboard**
+**Phase 11 — Live Race Dashboard**
 A second-screen race dashboard showing the live leaderboard, positions, pit status, tyre compounds, laps remaining, and race control messages.
 
-**Phase 11 — Track Map Visualisation**
+**Phase 12 — Track Map Visualisation**
 A circuit map showing driver positions moving around the track in real time or historical replay.
 
-**Phase 12 — Advanced Analytics**
+**Phase 13 — Advanced Analytics**
 Tyre strategy visualiser, pit stop comparison, pace charts, driver and team comparisons, and sector analysis.
 
-**Phase 13 — ML Prediction Layer**
+**Phase 14 — ML Prediction Layer**
 Machine learning models for podium prediction, pit window estimation, and race outcome simulation.
 
 ---
