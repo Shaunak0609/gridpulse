@@ -9,8 +9,8 @@ from app.services.email_service import send_email
 
 SEASON = int(os.getenv("F1_SEASON", "2026"))
 
-# Identifies standing-snapshot notifications so the dedup query can find them.
 _NOTIFICATION_TYPE = "favorite_driver_standing"
+_WINS_NOTIFICATION_TYPE = "favorite_driver_wins"
 
 
 def _build_email_body(user, driver, standing) -> str:
@@ -20,6 +20,20 @@ def _build_email_body(user, driver, standing) -> str:
         f"Hi {username},\n\n"
         f"{driver.full_name} is currently P{standing.position} in the "
         f"{SEASON} driver standings with {points} points.\n\n"
+        f"Head to GridPulse to see the full standings and upcoming race schedule.\n\n"
+        f"— The GridPulse team\n\n"
+        f"To stop receiving these emails, turn off favourite-driver email alerts "
+        f"in your GridPulse settings."
+    )
+
+
+def _build_wins_email_body(user, driver, standing) -> str:
+    username = user.username or user.email
+    wins = int(standing.wins)
+    win_word = "win" if wins == 1 else "wins"
+    return (
+        f"Hi {username},\n\n"
+        f"{driver.full_name} has {wins} {win_word} in the {SEASON} season.\n\n"
         f"Head to GridPulse to see the full standings and upcoming race schedule.\n\n"
         f"— The GridPulse team\n\n"
         f"To stop receiving these emails, turn off favourite-driver email alerts "
@@ -133,6 +147,115 @@ def generate_standing_notifications(db: Session) -> dict:
         "created": created,
         "skipped_preference": skipped_preference,
         "skipped_no_standing": skipped_no_standing,
+        "skipped_duplicate": skipped_duplicate,
+        "emails_sent": emails_sent,
+        "emails_failed": emails_failed,
+    }
+
+
+def generate_wins_notifications(db: Session) -> dict:
+    """
+    Create one in-app notification per user per favourited driver who has at
+    least one win in the configured season, derived from the DriverStanding
+    wins column.
+
+    This is the simplest result-based notification available without race
+    result tables: it tells users their driver has X wins this season rather
+    than just their standing position.
+
+    Dedup: one notification per (user, driver) of this type. Delete existing
+    'favorite_driver_wins' rows to regenerate after standings are refreshed.
+
+    Optional email follows the same rules as standings notifications.
+    """
+    favorites = db.query(FavoriteDriver).all()
+
+    checked = len(favorites)
+    created = 0
+    skipped_preference = 0
+    skipped_no_standing = 0
+    skipped_no_wins = 0
+    skipped_duplicate = 0
+    emails_sent = 0
+    emails_failed = 0
+
+    for fav in favorites:
+        user = fav.user
+        driver = fav.driver
+
+        if not user.favorite_driver_notifications_enabled:
+            skipped_preference += 1
+            continue
+
+        standing = (
+            db.query(DriverStanding)
+            .filter(
+                DriverStanding.driver_id == driver.id,
+                DriverStanding.season == SEASON,
+            )
+            .first()
+        )
+
+        if not standing:
+            skipped_no_standing += 1
+            continue
+
+        if not standing.wins or standing.wins == 0:
+            skipped_no_wins += 1
+            continue
+
+        already_notified = (
+            db.query(Notification)
+            .filter_by(
+                user_id=user.id,
+                type=_WINS_NOTIFICATION_TYPE,
+                related_driver_id=driver.id,
+            )
+            .first()
+            is not None
+        )
+
+        if already_notified:
+            skipped_duplicate += 1
+            continue
+
+        wins = int(standing.wins)
+        win_word = "win" if wins == 1 else "wins"
+        message = (
+            f"{driver.full_name} has {wins} {win_word} "
+            f"in the {SEASON} season."
+        )
+
+        db.add(Notification(
+            user_id=user.id,
+            type=_WINS_NOTIFICATION_TYPE,
+            title="Race wins update",
+            message=message,
+            related_driver_id=driver.id,
+        ))
+        db.commit()
+        created += 1
+
+        if user.email_notifications_enabled and user.favorite_driver_email_alerts_enabled:
+            try:
+                send_email(
+                    to=user.email,
+                    subject=(
+                        f"GridPulse: {driver.full_name} has {wins} {win_word} "
+                        f"in {SEASON}"
+                    ),
+                    body=_build_wins_email_body(user, driver, standing),
+                )
+                emails_sent += 1
+            except RuntimeError:
+                emails_failed += 1
+
+    return {
+        "checked": checked,
+        "created": created,
+        "skipped_preference": skipped_preference,
+        "skipped_no_standing": skipped_no_standing,
+        "skipped_no_wins": skipped_no_wins,
         "skipped_duplicate": skipped_duplicate,
         "emails_sent": emails_sent,
         "emails_failed": emails_failed,

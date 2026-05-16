@@ -14,7 +14,7 @@ function formatDateTime(dateStr: string): string {
   })
 }
 
-const DRIVER_NOTIFICATION_TYPES = new Set(['favorite_driver_standing'])
+const DRIVER_NOTIFICATION_TYPES = new Set(['favorite_driver_standing', 'favorite_driver_wins'])
 
 function NotificationIcon({ type, read }: { type: string; read: boolean }) {
   if (DRIVER_NOTIFICATION_TYPES.has(type)) {
@@ -38,15 +38,19 @@ function NotificationIcon({ type, read }: { type: string; read: boolean }) {
   )
 }
 
+const BADGE_LABELS: Record<string, string> = {
+  favorite_driver_standing: 'Driver update',
+  favorite_driver_wins: 'Race wins',
+}
+
 function NotificationTypeBadge({ type }: { type: string }) {
-  if (type === 'favorite_driver_standing') {
-    return (
-      <span className="inline-block align-middle text-[10px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-950/60 border border-amber-900/50 px-1.5 py-0.5 rounded ml-2">
-        Driver update
-      </span>
-    )
-  }
-  return null
+  const label = BADGE_LABELS[type]
+  if (!label) return null
+  return (
+    <span className="inline-block align-middle text-[10px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-950/60 border border-amber-900/50 px-1.5 py-0.5 rounded ml-2">
+      {label}
+    </span>
+  )
 }
 
 function NotificationRow({
