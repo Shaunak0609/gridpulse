@@ -25,3 +25,7 @@ class User(Base):
     email_notifications_enabled = Column(Boolean, nullable=False, server_default="false")
     calendar_email_reminders_enabled = Column(Boolean, nullable=False, server_default="false")
     favorite_driver_email_alerts_enabled = Column(Boolean, nullable=False, server_default="false")
+
+    # In-app notification preferences — defaults to True (opt-out)
+    # Users who favourite a driver expect to see updates; they can turn this off if not wanted.
+    favorite_driver_notifications_enabled = Column(Boolean, nullable=False, server_default="true")

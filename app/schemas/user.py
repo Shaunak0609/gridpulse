@@ -41,3 +41,15 @@ class EmailPreferencesUpdate(BaseModel):
     email_notifications_enabled: bool | None = None
     calendar_email_reminders_enabled: bool | None = None
     favorite_driver_email_alerts_enabled: bool | None = None
+
+
+class NotificationPreferencesResponse(BaseModel):
+    favorite_driver_notifications_enabled: bool
+    favorite_driver_email_alerts_enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    favorite_driver_notifications_enabled: bool | None = None
+    favorite_driver_email_alerts_enabled: bool | None = None
