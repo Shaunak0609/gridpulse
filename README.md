@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 8
+## Current Status — Phase 9
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -117,6 +117,37 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend Reminders page — session reminders show a session-type badge (e.g. "Qualifying") and a colour-coded dot; race reminders show a "Race" badge
 - `scripts/seed_sessions.py` — seeds five standard sessions per race derived from each race's `start_date`; safe to run multiple times
 
+### Phase 9 — Favourite Driver Notifications, Non-Live (complete)
+
+- `favorite_driver_notifications_enabled` boolean column added to the `users` table — controls in-app notification delivery per user (defaults to `true`; opt-out model)
+- `GET /users/me/notification-preferences` — returns the current user's in-app notification preferences (protected)
+- `PUT /users/me/notification-preferences` — updates one or more notification preferences; partial update, any field can be omitted (protected)
+- `NotificationPreferences` and `NotificationPreferencesUpdate` Pydantic schemas added to `app/schemas/user.py`
+- `scripts/migrate_add_favorite_driver_notifications.py` — idempotent migration to add `favorite_driver_notifications_enabled` to an existing `users` table
+- `app/services/favorite_driver_notifications.py` — batch notification generation service with two functions:
+  - `generate_standing_notifications` — creates one `favorite_driver_standing` in-app notification per (user, driver) summarising the driver's championship position and points
+  - `generate_wins_notifications` — creates one `favorite_driver_wins` in-app notification per (user, driver) when the driver has at least one win in the configured season, derived from the existing `DriverStanding.wins` column
+- Both functions apply three rules in order: skip opted-out users → skip drivers with no standing data → skip (user, driver) pairs that already have a notification of that type (dedup)
+- `scripts/generate_favorite_driver_notifications.py` — CLI script that runs both generators and prints a result block per type showing checked, created, skipped, and email counts; includes a tip to delete existing rows for regeneration
+- Optional email delivery — after each new notification is committed, an email is sent if the user has `email_notifications_enabled` and `favorite_driver_email_alerts_enabled` both set to `true`; the notification row is always saved first so in-app delivery is never lost if the email fails
+- Frontend `NotificationPreferences` type and `getNotificationPreferences` / `updateNotificationPreferences` API functions added
+- Frontend Settings page (`/settings`) — loads email and notification preferences in parallel via `Promise.all`; new **Driver Notifications** section with two toggles: "In-app notifications" (`favorite_driver_notifications_enabled`) and "Email alerts" (`favorite_driver_email_alerts_enabled`); email alerts toggle is disabled when the master email switch is off; optimistic UI updates with revert on failure
+- Frontend Notifications page (`/notifications`) — `favorite_driver_standing` and `favorite_driver_wins` notifications are visually distinguished from other types: amber filled-star icon in the left gutter (replaces the red/gray unread dot), and a type-specific badge inline with the title ("Driver update" for standings, "Race wins" for wins); all read/mark-read/delete behaviour unchanged
+- Frontend Dashboard page (`/dashboard`) — "Driver Updates" section placed below Favourite Drivers shows the three most recent `favorite_driver_standing` or `favorite_driver_wins` notifications with the amber star treatment; non-driver notifications render in a separate "Recent Notifications" section that only appears when non-driver notifications exist; both sections link to `/notifications`
+
+**What notifications are currently supported:**
+
+| Type | Title | Trigger | Message example |
+|---|---|---|---|
+| `favorite_driver_standing` | Favourite driver update | Manual script run | "Max Verstappen is currently P1 in the 2026 driver standings with 136 points." |
+| `favorite_driver_wins` | Race wins update | Manual script run, only when wins > 0 | "Max Verstappen has 3 wins in the 2026 season." |
+
+**What is not yet supported:**
+- Per-race finish position notifications — requires a `race_results` table (no race result data ingested yet)
+- Per-qualifying position notifications — requires a `qualifying_results` table
+- Automatic or scheduled notification generation — currently manual only via `scripts/generate_favorite_driver_notifications.py`
+- Live or real-time alerts of any kind
+
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
 
 - `favorite_drivers` table — stores one row per `(user_id, driver_id)` pair; unique constraint `uq_favorite_driver_user` prevents duplicate favourites
@@ -221,7 +252,7 @@ gridpulse/
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
-│   │   ├── users.py              # GET /users/me, GET/PUT /users/me/email-preferences
+│   │   ├── users.py              # GET /users/me, email-preferences, notification-preferences (Phase 7/9)
 │   │   ├── drivers.py
 │   │   ├── teams.py
 │   │   ├── calendar.py
@@ -236,7 +267,8 @@ gridpulse/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
 │   │   ├── email_service.py      # Resend wrapper (Phase 7)
-│   │   └── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
+│   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
+│   │   └── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -248,8 +280,10 @@ gridpulse/
 │   ├── migrate_add_reminder_email_tracking.py  # adds email_sent columns to reminders (Phase 7)
 │   ├── migrate_create_sessions_table.py        # creates sessions table (Phase 7.5)
 │   ├── migrate_add_reminder_session_id.py      # adds session_id to reminders (Phase 7.5)
-│   ├── migrate_create_favorites_tables.py      # creates favorite_drivers and favorite_teams tables (Phase 8)
-│   └── send_due_reminder_emails.py             # CLI script to send due reminder emails (Phase 7)
+│   ├── migrate_create_favorites_tables.py           # creates favorite_drivers and favorite_teams tables (Phase 8)
+│   ├── migrate_add_favorite_driver_notifications.py # adds favorite_driver_notifications_enabled to users (Phase 9)
+│   ├── send_due_reminder_emails.py                  # CLI script to send due reminder emails (Phase 7)
+│   └── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
 └── requirements.txt
@@ -554,6 +588,8 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/users/me` | Yes — Bearer token | Return the logged-in user's profile |
 | GET | `/users/me/email-preferences` | Yes — Bearer token | Return the current user's email preferences |
 | PUT | `/users/me/email-preferences` | Yes — Bearer token | Update one or more email preferences |
+| GET | `/users/me/notification-preferences` | Yes — Bearer token | Return the current user's in-app notification preferences |
+| PUT | `/users/me/notification-preferences` | Yes — Bearer token | Update one or more in-app notification preferences |
 
 ### Reminder endpoints
 
@@ -988,13 +1024,94 @@ If you are setting up a fresh database, `create_tables.py` creates both tables a
 
 ---
 
+## Testing Favourite Driver Notifications
+
+### Set up the database column
+
+If you have an existing database, run the migration to add the new user preference column:
+
+```bash
+python scripts/migrate_add_favorite_driver_notifications.py
+```
+
+Fresh databases created with `create_tables.py` already include the column — no migration needed.
+
+### Generate notifications manually
+
+Make sure the virtual environment is active and the backend is not required to be running for this step:
+
+```bash
+source venv/bin/activate
+python scripts/generate_favorite_driver_notifications.py
+```
+
+Expected output (first run, after favouriting at least one driver):
+
+```
+Favourite-driver notifications — generation complete.
+
+Standing notifications:
+  Favourite drivers checked : 1
+  Notifications created     : 1
+  Skipped (duplicate)       : 0
+  Skipped (no standing data): 0
+  Skipped (opted out)       : 0
+  Emails sent               : 1
+  Emails failed             : 0
+
+Wins notifications:
+  Favourite drivers checked : 1
+  Notifications created     : 1
+  Skipped (duplicate)       : 0
+  Skipped (no standing data): 0
+  Skipped (no wins yet)     : 0
+  Skipped (opted out)       : 0
+  Emails sent               : 1
+  Emails failed             : 0
+```
+
+Running the script again immediately will show `Notifications created: 0` and a tip about deleting existing rows. To regenerate:
+
+```sql
+DELETE FROM notifications WHERE type IN ('favorite_driver_standing', 'favorite_driver_wins');
+```
+
+### Test notification preferences in the frontend
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and go to `http://localhost:5173/settings`
+3. The page loads **Email Notifications** and **Driver Notifications** sections simultaneously
+4. In **Driver Notifications**: toggle "In-app notifications" off — the backend should save immediately (optimistic update)
+5. Run the script — affected users should be counted under "Skipped (opted out)"
+6. Toggle it back on and re-run — notifications should be created again (after deleting existing rows)
+7. The **Email alerts** toggle under Driver Notifications is disabled when the master email switch is off
+
+### Test the Notifications page
+
+1. Go to `http://localhost:5173/notifications`
+2. `favorite_driver_standing` notifications should show an amber star icon and a **"Driver update"** badge
+3. `favorite_driver_wins` notifications should show the same amber star and a **"Race wins"** badge
+4. Mark one as read — the star turns grey and the row dims to 50% opacity
+5. Delete one — the row is removed immediately
+
+### Test the Dashboard Driver Updates section
+
+1. Go to `http://localhost:5173/dashboard`
+2. The **Driver Updates** section appears below Favourite Drivers and shows up to 3 recent `favorite_driver_standing` or `favorite_driver_wins` notifications with amber stars
+3. Unread notifications show a small amber dot in the top-right of the card; read ones are dimmed
+4. The "All notifications →" link goes to `/notifications`
+5. If you have no driver update notifications yet, the section shows an empty state with a "Browse drivers" link
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
-- Favourite-driver notifications — users can already favourite drivers, but there is no alert system yet for qualifying results, race results, or position changes (planned for Phase 9)
+- Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
+- Per-qualifying position notifications — requires a `qualifying_results` table
+- Automatic or scheduled notification generation — currently manual only via `scripts/generate_favorite_driver_notifications.py`
 - Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times from the API will be added in a future sync update
-- Favourite-driver email alerts — the email preference toggle (`favorite_driver_email_alerts_enabled`) already exists but the delivery logic is not yet built
 - Push notifications
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
 - AI features
@@ -1038,8 +1155,8 @@ Sessions table and model for FP1–FP3, Sprint, Qualifying, and Race. Session-aw
 **Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard** *(complete)*
 Users can favourite drivers and teams. A protected Dashboard page shows a personalised summary: favourite drivers and teams, upcoming sessions, reminders, and recent notifications. All times display in the user's local timezone.
 
-**Phase 9 — Favourite Driver Notifications**
-When a user's favourite driver achieves a notable result — qualifying position, race finish, positions gained — GridPulse creates an in-app notification and optionally sends an email alert.
+**Phase 9 — Favourite Driver Notifications, Non-Live** *(complete)*
+In-app and optional email notifications for favourited drivers. Two notification types are currently supported: a championship standings snapshot and a race wins update, both generated manually from existing `DriverStanding` data. Per-race and per-qualifying result notifications are planned once result tables are added.
 
 **Phase 10 — AI Race Assistant**
 A protected AI feature for signed-in users. Ask questions about races, drivers, and strategy grounded in real race data.
