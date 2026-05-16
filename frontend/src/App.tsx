@@ -15,6 +15,7 @@ import Reminders from './pages/Reminders'
 import Notifications from './pages/Notifications'
 import Settings from './pages/Settings'
 import GoogleCallback from './pages/GoogleCallback'
+import Dashboard from './pages/Dashboard'
 
 function App() {
   return (
@@ -61,6 +62,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
                 </ProtectedRoute>
               }
             />

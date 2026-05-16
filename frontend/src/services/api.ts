@@ -1,4 +1,4 @@
-import type { AuthUser, Driver, DriverStanding, EmailPreferences, LoginPayload, Notification, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
+import type { AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -152,4 +152,71 @@ export const sendTestEmail = (token: string): Promise<{ message: string }> =>
     const data = await res.json()
     if (!res.ok) throw new Error(data?.detail ?? 'Failed to send test email')
     return data as { message: string }
+  })
+
+// ─── Favorite endpoints ──────────────────────────────────────────────────────
+
+export const getFavoriteDrivers = (token: string): Promise<FavoriteDriver[]> =>
+  fetch(`${API_BASE}/me/favorites/drivers`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch favourite drivers')
+    return data as FavoriteDriver[]
+  })
+
+export const addFavoriteDriver = (token: string, driverId: number): Promise<FavoriteDriver> =>
+  fetch(`${API_BASE}/me/favorites/drivers/${driverId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to add favourite driver')
+    return data as FavoriteDriver
+  })
+
+export const removeFavoriteDriver = (token: string, driverId: number): Promise<void> =>
+  fetch(`${API_BASE}/me/favorites/drivers/${driverId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(res => {
+    if (!res.ok) throw new Error('Failed to remove favourite driver')
+  })
+
+export const getFavoriteTeams = (token: string): Promise<FavoriteTeam[]> =>
+  fetch(`${API_BASE}/me/favorites/teams`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch favourite teams')
+    return data as FavoriteTeam[]
+  })
+
+export const addFavoriteTeam = (token: string, teamId: number): Promise<FavoriteTeam> =>
+  fetch(`${API_BASE}/me/favorites/teams/${teamId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to add favourite team')
+    return data as FavoriteTeam
+  })
+
+export const removeFavoriteTeam = (token: string, teamId: number): Promise<void> =>
+  fetch(`${API_BASE}/me/favorites/teams/${teamId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(res => {
+    if (!res.ok) throw new Error('Failed to remove favourite team')
+  })
+
+// ─── Dashboard endpoint ──────────────────────────────────────────────────────
+
+export const getDashboard = (token: string): Promise<Dashboard> =>
+  fetch(`${API_BASE}/me/dashboard`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch dashboard')
+    return data as Dashboard
   })

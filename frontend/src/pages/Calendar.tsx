@@ -8,19 +8,25 @@ import type { Race, Session } from '../types'
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return 'TBC'
+  // date-only strings are UTC midnight — force UTC to avoid off-by-one for users west of UTC
   return new Date(dateStr).toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: 'UTC',
   })
 }
 
 function formatSessionTime(isoStr: string | null): string {
   if (!isoStr) return 'TBA'
-  const d = new Date(isoStr)
-  const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
-  return `${day} · ${time} UTC`
+  return new Date(isoStr).toLocaleString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  })
 }
 
 function isPast(dateStr: string | null): boolean {

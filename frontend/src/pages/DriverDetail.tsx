@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getDriver } from '../services/api'
+import { getDriver, getFavoriteDrivers, addFavoriteDriver, removeFavoriteDriver } from '../services/api'
+import { useAuth } from '../context/AuthContext'
 import type { Driver } from '../types'
 
 function StatCard({ label, value }: { label: string; value: string | number | null }) {
@@ -32,11 +33,19 @@ function LoadingSkeleton() {
   )
 }
 
+type FavStatus = 'idle' | 'loading' | 'error'
+
 export default function DriverDetail() {
   const { id } = useParams<{ id: string }>()
+  const { isAuthenticated, token } = useAuth()
+
   const [driver, setDriver] = useState<Driver | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const [isFavorited, setIsFavorited] = useState(false)
+  const [favStatus, setFavStatus] = useState<FavStatus>('idle')
+  const [favError, setFavError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -45,6 +54,35 @@ export default function DriverDetail() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [id])
+
+  // Check whether this driver is already in the user's favorites.
+  useEffect(() => {
+    if (!token || !id) return
+    getFavoriteDrivers(token)
+      .then(favorites => {
+        setIsFavorited(favorites.some(f => f.driver_id === parseInt(id)))
+      })
+      .catch(() => {})
+  }, [token, id])
+
+  async function handleFavoriteToggle() {
+    if (!token || !id) return
+    setFavStatus('loading')
+    setFavError(null)
+    try {
+      if (isFavorited) {
+        await removeFavoriteDriver(token, parseInt(id))
+        setIsFavorited(false)
+      } else {
+        await addFavoriteDriver(token, parseInt(id))
+        setIsFavorited(true)
+      }
+      setFavStatus('idle')
+    } catch (e) {
+      setFavStatus('error')
+      setFavError(e instanceof Error ? e.message : 'Something went wrong')
+    }
+  }
 
   if (loading) return <LoadingSkeleton />
 
@@ -72,15 +110,56 @@ export default function DriverDetail() {
 
       {/* Header */}
       <div className="mb-10">
-        <div className="flex items-baseline gap-5 flex-wrap">
-          <span className="text-red-500 font-black text-7xl font-mono leading-none opacity-70">
-            {driver.driver_number ?? '—'}
-          </span>
-          <div>
-            <h1 className="text-4xl font-black text-white tracking-tight">{driver.full_name}</h1>
-            <p className="text-red-400 text-lg mt-1">{driver.team ?? 'No team'}</p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-baseline gap-5 flex-wrap">
+            <span className="text-red-500 font-black text-7xl font-mono leading-none opacity-70">
+              {driver.driver_number ?? '—'}
+            </span>
+            <div>
+              <h1 className="text-4xl font-black text-white tracking-tight">{driver.full_name}</h1>
+              <p className="text-red-400 text-lg mt-1">{driver.team ?? 'No team'}</p>
+            </div>
+          </div>
+
+          {/* Favorite action */}
+          <div className="flex flex-col items-end gap-1 pt-1">
+            {!isAuthenticated ? (
+              <div className="text-right">
+                <Link
+                  to="/login"
+                  className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white transition-colors duration-150"
+                >
+                  <span>☆</span>
+                  <span>Log in to favourite</span>
+                </Link>
+                <p className="text-xs text-gray-600 mt-1.5">
+                  Sign in to follow this driver
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={handleFavoriteToggle}
+                disabled={favStatus === 'loading'}
+                className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg border transition-colors duration-150 disabled:opacity-40
+                  ${isFavorited
+                    ? 'border-red-800 text-red-400 hover:bg-red-950/40'
+                    : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white'
+                  }`}
+              >
+                <span>{isFavorited ? '★' : '☆'}</span>
+                <span>
+                  {favStatus === 'loading'
+                    ? isFavorited ? 'Removing…' : 'Adding…'
+                    : isFavorited ? 'Favourited' : 'Add to Favourites'}
+                </span>
+              </button>
+            )}
+            {favStatus === 'error' && (
+              <p className="text-xs text-red-400">{favError}</p>
+            )}
           </div>
         </div>
+
         <div className="h-px bg-gradient-to-r from-red-600 to-transparent mt-6" />
       </div>
 

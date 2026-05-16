@@ -87,6 +87,52 @@ export interface ReminderCreate {
   session_id?: number
 }
 
+export interface FavoriteDriver {
+  id: number
+  user_id: number
+  driver_id: number
+  created_at: string
+  driver: {
+    id: number
+    code: string
+    full_name: string
+    nationality: string | null
+    driver_number: number | null
+    team: {
+      id: number
+      name: string
+      constructor_name: string
+      base: string | null
+    } | null
+  }
+}
+
+export interface FavoriteTeam {
+  id: number
+  user_id: number
+  team_id: number
+  created_at: string
+  team: {
+    id: number
+    name: string
+    constructor_name: string
+    base: string | null
+  }
+}
+
+export interface Dashboard {
+  user: {
+    id: number
+    email: string
+    username: string | null
+  }
+  favorite_drivers: FavoriteDriver[]
+  favorite_teams: FavoriteTeam[]
+  upcoming_sessions: Session[]
+  upcoming_reminders: Reminder[]
+  recent_notifications: Notification[]
+}
+
 export interface EmailPreferences {
   email_notifications_enabled: boolean
   calendar_email_reminders_enabled: boolean
