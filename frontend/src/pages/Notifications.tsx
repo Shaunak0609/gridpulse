@@ -14,6 +14,41 @@ function formatDateTime(dateStr: string): string {
   })
 }
 
+const DRIVER_NOTIFICATION_TYPES = new Set(['favorite_driver_standing'])
+
+function NotificationIcon({ type, read }: { type: string; read: boolean }) {
+  if (DRIVER_NOTIFICATION_TYPES.has(type)) {
+    return (
+      <span className={`mt-0.5 shrink-0 ${read ? 'text-gray-700' : 'text-amber-500'}`}>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span
+      className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${read ? 'bg-gray-700' : 'bg-red-500'}`}
+    />
+  )
+}
+
+function NotificationTypeBadge({ type }: { type: string }) {
+  if (type === 'favorite_driver_standing') {
+    return (
+      <span className="inline-block align-middle text-[10px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-950/60 border border-amber-900/50 px-1.5 py-0.5 rounded ml-2">
+        Driver update
+      </span>
+    )
+  }
+  return null
+}
+
 function NotificationRow({
   notification,
   onMarkRead,
@@ -40,20 +75,17 @@ function NotificationRow({
       className={`flex items-start gap-4 px-5 py-4 border-b border-gray-800 last:border-0 transition-colors duration-150
         ${notification.read ? 'opacity-50' : 'hover:bg-gray-800/50'}`}
     >
-      {/* Unread dot */}
-      <span
-        className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${
-          notification.read ? 'bg-gray-700' : 'bg-red-500'
-        }`}
-      />
+      {/* Type icon */}
+      <NotificationIcon type={notification.type} read={notification.read} />
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <p className={`font-semibold text-sm ${notification.read ? 'text-gray-400' : 'text-white'}`}>
           {notification.title}
+          <NotificationTypeBadge type={notification.type} />
         </p>
         {notification.message && (
-          <p className="text-gray-500 text-xs mt-0.5">{notification.message}</p>
+          <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{notification.message}</p>
         )}
         <p className="text-gray-700 text-xs font-mono mt-1">{formatDateTime(notification.created_at)}</p>
       </div>

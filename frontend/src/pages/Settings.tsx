@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
-import { getEmailPreferences, updateEmailPreferences, sendTestEmail } from '../services/api'
+import {
+  getEmailPreferences,
+  updateEmailPreferences,
+  getNotificationPreferences,
+  updateNotificationPreferences,
+  sendTestEmail,
+} from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import type { EmailPreferences } from '../types'
+import type { EmailPreferences, NotificationPreferences } from '../types'
 
 // ─── Toggle component ────────────────────────────────────────────────────────
 
@@ -78,6 +84,7 @@ function SkeletonRow() {
 export default function Settings() {
   const { token, user } = useAuth()
   const [prefs, setPrefs] = useState<EmailPreferences | null>(null)
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -86,8 +93,11 @@ export default function Settings() {
 
   useEffect(() => {
     if (!token) return
-    getEmailPreferences(token)
-      .then(setPrefs)
+    Promise.all([getEmailPreferences(token), getNotificationPreferences(token)])
+      .then(([emailPrefs, notificationPrefs]) => {
+        setPrefs(emailPrefs)
+        setNotifPrefs(notificationPrefs)
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [token])
@@ -105,6 +115,21 @@ export default function Settings() {
     } catch (e) {
       // Revert on failure
       setPrefs(prev => prev ? { ...prev, [field]: !value } : prev)
+      setSaveError(e instanceof Error ? e.message : 'Failed to save setting')
+    }
+  }
+
+  async function handleNotifToggle(field: keyof NotificationPreferences, value: boolean) {
+    if (!token || !notifPrefs) return
+    setSaveError(null)
+
+    setNotifPrefs(prev => prev ? { ...prev, [field]: value } : prev)
+
+    try {
+      const updated = await updateNotificationPreferences(token, { [field]: value })
+      setNotifPrefs(updated)
+    } catch (e) {
+      setNotifPrefs(prev => prev ? { ...prev, [field]: !value } : prev)
       setSaveError(e instanceof Error ? e.message : 'Failed to save setting')
     }
   }
@@ -179,7 +204,7 @@ export default function Settings() {
               />
               <SettingRow
                 label="Favourite driver alerts"
-                description="Notify me about results and updates for my favourite drivers. Coming soon."
+                description="Notify me about results and updates for my favourite drivers."
                 enabled={prefs.favorite_driver_email_alerts_enabled}
                 onChange={v => handleToggle('favorite_driver_email_alerts_enabled', v)}
                 disabled={!masterOn}
@@ -192,6 +217,34 @@ export default function Settings() {
             Enable email notifications above to configure individual settings.
           </p>
         )}
+      </div>
+
+      {/* Driver notifications card */}
+      <div className="mb-6">
+        <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3 px-1">
+          Driver Notifications
+        </p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-2">
+          {loading ? (
+            <SkeletonRow />
+          ) : notifPrefs ? (
+            <>
+              <SettingRow
+                label="In-app notifications"
+                description="Show in-app notifications for updates about your favourite drivers."
+                enabled={notifPrefs.favorite_driver_notifications_enabled}
+                onChange={v => handleNotifToggle('favorite_driver_notifications_enabled', v)}
+              />
+              <SettingRow
+                label="Email alerts"
+                description="Send emails for updates about your favourite drivers. Requires email notifications to be enabled above."
+                enabled={notifPrefs.favorite_driver_email_alerts_enabled}
+                onChange={v => handleNotifToggle('favorite_driver_email_alerts_enabled', v)}
+                disabled={!(prefs?.email_notifications_enabled ?? false)}
+              />
+            </>
+          ) : null}
+        </div>
       </div>
 
       {/* Test email section */}

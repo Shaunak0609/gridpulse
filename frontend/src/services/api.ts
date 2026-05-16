@@ -1,4 +1,4 @@
-import type { AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
+import type { AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, NotificationPreferences, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -142,6 +142,29 @@ export const updateEmailPreferences = (
     const data = await res.json()
     if (!res.ok) throw new Error(data?.detail ?? 'Failed to update email preferences')
     return data as EmailPreferences
+  })
+
+export const getNotificationPreferences = (token: string): Promise<NotificationPreferences> =>
+  fetch(`${API_BASE}/users/me/notification-preferences`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch notification preferences')
+    return data as NotificationPreferences
+  })
+
+export const updateNotificationPreferences = (
+  token: string,
+  payload: Partial<NotificationPreferences>,
+): Promise<NotificationPreferences> =>
+  fetch(`${API_BASE}/users/me/notification-preferences`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to update notification preferences')
+    return data as NotificationPreferences
   })
 
 export const sendTestEmail = (token: string): Promise<{ message: string }> =>

@@ -18,6 +18,8 @@ def main() -> None:
         print(f"  Skipped (duplicate)       : {result['skipped_duplicate']}")
         print(f"  Skipped (no standing data): {result['skipped_no_standing']}")
         print(f"  Skipped (opted out)       : {result['skipped_preference']}")
+        print(f"  Emails sent               : {result['emails_sent']}")
+        print(f"  Emails failed             : {result['emails_failed']}")
 
         if result['created'] == 0 and result['checked'] > 0:
             print()

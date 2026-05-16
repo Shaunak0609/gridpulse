@@ -139,6 +139,11 @@ export interface EmailPreferences {
   favorite_driver_email_alerts_enabled: boolean
 }
 
+export interface NotificationPreferences {
+  favorite_driver_notifications_enabled: boolean
+  favorite_driver_email_alerts_enabled: boolean
+}
+
 export interface Notification {
   id: number
   user_id: number
