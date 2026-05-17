@@ -1,4 +1,4 @@
-import type { AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, NotificationPreferences, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
+import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, NotificationPreferences, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -242,4 +242,35 @@ export const getDashboard = (token: string): Promise<Dashboard> =>
     const data = await res.json()
     if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch dashboard')
     return data as Dashboard
+  })
+
+// ─── AI Race Assistant endpoints ─────────────────────────────────────────────
+
+export const askAI = (token: string, prompt: string, request_type = 'general'): Promise<AIResponse> =>
+  fetch(`${API_BASE}/ai/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ prompt, request_type }),
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to get AI response')
+    return data as AIResponse
+  })
+
+export const getAIHistory = (token: string): Promise<AIHistoryItem[]> =>
+  fetch(`${API_BASE}/ai/history`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch AI history')
+    return data as AIHistoryItem[]
+  })
+
+export const getAIUsage = (token: string): Promise<AIUsage> =>
+  fetch(`${API_BASE}/ai/usage`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch AI usage')
+    return data as AIUsage
   })

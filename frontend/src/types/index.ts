@@ -155,3 +155,26 @@ export interface Notification {
   related_race_id: number | null
   related_driver_id: number | null
 }
+
+export interface AIResponse {
+  id: number
+  prompt: string
+  response: string | null
+  request_type: string
+  created_at: string
+}
+
+export interface AIHistoryItem {
+  id: number
+  prompt: string
+  response: string | null
+  request_type: string
+  created_at: string
+  model_name: string | null
+}
+
+export interface AIUsage {
+  requests_today: number
+  daily_limit: number
+  remaining: number
+}
