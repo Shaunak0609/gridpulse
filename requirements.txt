@@ -10,3 +10,5 @@ python-multipart
 pydantic[email]
 google-auth
 resend
+groq
+anthropic

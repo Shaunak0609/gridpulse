@@ -8,3 +8,4 @@ from app.models.notification import Notification
 from app.models.session import Session
 from app.models.favorite_driver import FavoriteDriver
 from app.models.favorite_team import FavoriteTeam
+from app.models.ai_request import AIRequest
