@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 9.5
+## Current Status — Phase 10
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -159,6 +159,67 @@ Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favouri
 - Per-qualifying position notifications — requires a `qualifying_results` table
 - Live or real-time alerts of any kind
 
+### Phase 10 — AI Race Assistant (complete)
+
+- `ai_requests` table — stores each user's AI prompt, the assistant's response, model name, token count, and timestamp
+- `AIRequest` SQLAlchemy model with a foreign key to `users` and a `user` relationship
+- `scripts/migrate_create_ai_requests_table.py` — idempotent migration to create `ai_requests` on an existing database; fresh databases use `create_tables.py` directly
+- `app/schemas/ai.py` — three Pydantic schemas: `AIRequestCreate` (prompt + optional request type), `AIResponse` (returned from POST), `AIHistoryResponse` (returned from GET history, includes model name)
+- `app/services/ai_service.py` — provider-isolated AI call layer:
+  - `AI_PROVIDER`, `AI_API_KEY`, and `AI_MODEL` are read from `.env`
+  - Supported providers: `groq` (default, free tier) and `anthropic`
+  - Adding a new provider (e.g. OpenRouter) requires only a new `_call_*` function and a one-line entry in `_PROVIDERS`
+  - All SDK errors (invalid key, rate limit, credit balance, network) are caught and returned as readable messages rather than raising a 500
+- `app/services/ai_context.py` — builds a plain-text context string from the GridPulse database to inject into every prompt:
+  - UTC snapshot timestamp (so the AI knows it is not a live feed)
+  - User profile, favourite drivers and teams
+  - Top-10 driver standings for the configured season
+  - Next 5 upcoming sessions
+  - Next 3 upcoming reminders
+  - Last 3 notifications
+  - Explicit "Data NOT Available" section listing race results, qualifying, lap times, pit stops, tyres, and live timing — prevents the AI from inventing those values
+- `app/routes/ai.py` — two protected endpoints:
+  - `POST /ai/explain` — accepts a prompt, builds context, calls the AI provider, stores the request and response, returns the record; enforces a 20-request-per-user-per-day limit; returns `429` if the limit is reached
+  - `GET /ai/history` — returns the current user's last 20 AI requests, newest first
+  - `GET /ai/usage` — returns `requests_today`, `daily_limit`, and `remaining` for the current user
+- System prompt grounding rules:
+  - Three explicit response modes: answer from context, answer from general F1 knowledge (with a disclosure), or say "GridPulse doesn't have that data yet"
+  - Prohibition on inventing race results, qualifying times, or lap data
+  - Prohibition on inferring race results from championship points
+  - Prohibition on using "currently" or "live" language about race events
+  - The AI is not permitted to say it is "checking" or "fetching" data — it only has the injected context
+- Frontend AI API functions in `api.ts`: `askAI`, `getAIHistory`, `getAIUsage`
+- Frontend TypeScript types: `AIResponse`, `AIHistoryItem`, `AIUsage`
+- Frontend `/ai` page — protected route; redirects to `/login` if not authenticated:
+  - Prompt textarea with ⌘+Enter shortcut and character count
+  - Submit button with spinner and "Analysing…" loading state
+  - Usage bar showing requests used today out of 20 (colour-coded: green → amber → red)
+  - Amber "Daily limit reached" warning when limit is hit; submit button disabled
+  - Latest response card with `whitespace-pre-wrap` formatting and timestamp
+  - Collapsible question history showing the 20 most recent prompts; click any to expand the full response
+  - Empty states for both the response area and history list
+- Navbar — "AI" link added to the authenticated link group; not visible when logged out
+
+**AI environment variables (add to `.env`):**
+
+```
+AI_PROVIDER=groq
+AI_API_KEY=gsk_your_groq_api_key_here
+AI_MODEL=llama-3.1-8b-instant
+```
+
+`AI_PROVIDER` — `groq` (default, free tier) or `anthropic`.
+`AI_API_KEY` — your API key from [console.groq.com](https://console.groq.com) or [console.anthropic.com](https://console.anthropic.com).
+`AI_MODEL` — model name for the chosen provider. For Groq: `llama-3.1-8b-instant` (fast, free) or `llama-3.3-70b-versatile` (higher quality). For Anthropic: `claude-haiku-4-5-20251001` or `claude-sonnet-4-6`.
+
+**What is not yet included in Phase 10:**
+- Suggested prompt cards on the AI page — planned for a future UI pass
+- Multi-turn conversation threading — each question is independent (single-turn Q&A)
+- Streaming responses
+- Race results, qualifying data, or lap times in AI context — those data tables do not exist yet
+
+---
+
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
 
 - `favorite_drivers` table — stores one row per `(user_id, driver_id)` pair; unique constraint `uq_favorite_driver_user` prevents duplicate favourites
@@ -200,6 +261,8 @@ Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favouri
 | JWT tokens | python-jose |
 | Google OAuth | google-auth |
 | Email delivery | Resend |
+| AI provider | Groq (default, free tier) / Anthropic |
+| AI SDK | groq / anthropic Python SDKs |
 | Frontend | React + Vite + TypeScript |
 | Styling | Tailwind CSS v4 |
 | Routing | React Router v6 |
@@ -248,7 +311,8 @@ gridpulse/
 │   │   ├── notification.py       # Notification model (Phase 6)
 │   │   ├── session.py            # Session model (Phase 7.5)
 │   │   ├── favorite_driver.py    # FavoriteDriver model — user/driver join table (Phase 8)
-│   │   └── favorite_team.py      # FavoriteTeam model — user/team join table (Phase 8)
+│   │   ├── favorite_team.py      # FavoriteTeam model — user/team join table (Phase 8)
+│   │   └── ai_request.py         # AIRequest model — stores prompt, response, tokens (Phase 10)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
@@ -259,7 +323,8 @@ gridpulse/
 │   │   ├── notification.py       # NotificationResponse (Phase 6)
 │   │   ├── session.py            # SessionCreate, SessionResponse (Phase 7.5)
 │   │   ├── favorite.py           # FavoriteDriverResponse, FavoriteTeamResponse + nested info schemas (Phase 8)
-│   │   └── dashboard.py          # DashboardResponse — assembles all sections (Phase 8)
+│   │   ├── dashboard.py          # DashboardResponse — assembles all sections (Phase 8)
+│   │   └── ai.py                 # AIRequestCreate, AIResponse, AIHistoryResponse (Phase 10)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -273,13 +338,16 @@ gridpulse/
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
 │   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
-│   │   └── dashboard.py          # GET /me/dashboard (Phase 8)
+│   │   ├── dashboard.py          # GET /me/dashboard (Phase 8)
+│   │   └── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
 │   │   ├── email_service.py      # Resend wrapper (Phase 7)
 │   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
-│   │   └── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
+│   │   ├── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
+│   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic (Phase 10)
+│   │   └── ai_context.py         # builds plain-text GridPulse context for AI prompts (Phase 10)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -293,6 +361,7 @@ gridpulse/
 │   ├── migrate_add_reminder_session_id.py      # adds session_id to reminders (Phase 7.5)
 │   ├── migrate_create_favorites_tables.py           # creates favorite_drivers and favorite_teams tables (Phase 8)
 │   ├── migrate_add_favorite_driver_notifications.py # adds favorite_driver_notifications_enabled to users (Phase 9)
+│   ├── migrate_create_ai_requests_table.py          # creates ai_requests table (Phase 10)
 │   ├── send_due_reminder_emails.py                  # CLI script to send due reminder emails (Phase 7)
 │   └── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
 ├── .env                          # local environment variables (not committed)
@@ -636,6 +705,16 @@ All favourite endpoints require a valid JWT Bearer token. Users can only read an
 | POST | `/me/favorites/teams/{team_id}` | Yes — Bearer token | Favourite a team; `404` if team not found; `409` if already favourited |
 | DELETE | `/me/favorites/teams/{team_id}` | Yes — Bearer token | Remove a favourite team; `404` if not in the user's list |
 | GET | `/me/dashboard` | Yes — Bearer token | Personalised summary: user profile, favourite drivers and teams, next 5 sessions, next 5 reminders, 5 most recent notifications |
+
+### AI Race Assistant endpoints
+
+All AI endpoints require a valid JWT Bearer token. The daily limit is 20 requests per user.
+
+| Method | Endpoint | Auth required | Description |
+|---|---|---|---|
+| POST | `/ai/explain` | Yes — Bearer token | Send a prompt; returns the AI's response grounded in GridPulse context; `429` if daily limit reached |
+| GET | `/ai/history` | Yes — Bearer token | Return the current user's last 20 AI requests, newest first |
+| GET | `/ai/usage` | Yes — Bearer token | Return `requests_today`, `daily_limit`, and `remaining` for today |
 
 ### Email endpoints
 
@@ -1184,31 +1263,143 @@ No code changes are needed. The sync script already handles data refresh and not
 
 ---
 
+## Testing the AI Race Assistant
+
+### Get a Groq API key
+
+1. Go to [console.groq.com](https://console.groq.com) and sign up (free)
+2. Click **API Keys** → **Create API Key**
+3. Copy the key (it starts with `gsk_`)
+4. Add to your `.env`:
+   ```
+   AI_PROVIDER=groq
+   AI_API_KEY=gsk_your_key_here
+   AI_MODEL=llama-3.1-8b-instant
+   ```
+5. Restart the backend: `uvicorn app.main:app --reload`
+
+### Run the migration (existing databases only)
+
+If you already have a database from a previous phase, create the `ai_requests` table:
+
+```bash
+python scripts/migrate_create_ai_requests_table.py
+```
+
+Expected output:
+```
+Running migration: create ai_requests table...
+Done. ai_requests table created (or already existed — safe to run again).
+```
+
+Fresh databases created with `create_tables.py` include the table automatically.
+
+### Test in FastAPI docs
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Open `http://127.0.0.1:8000/docs`
+3. Log in via **POST /auth/login** and copy the `access_token`
+4. Click the **Authorize** padlock, paste the token, click **Authorize**
+
+**Ask a question:**
+
+5. Find **POST /ai/explain** → **Try it out** and enter:
+   ```json
+   {
+     "prompt": "Who are my favourite drivers and where are they in the standings?",
+     "request_type": "general"
+   }
+   ```
+6. Click **Execute** — you should get a `200` response with the AI's answer in the `response` field
+
+**Check history:**
+
+7. Find **GET /ai/history** → **Try it out** → **Execute** — your question and response should appear
+
+**Check usage:**
+
+8. Find **GET /ai/usage** → **Execute** — you should see `requests_today`, `daily_limit: 20`, and `remaining`
+
+**Test the daily limit:**
+
+Insert 20 fake rows in psql to trigger the limit without spending real API calls:
+
+```sql
+INSERT INTO ai_requests (user_id, prompt, response, request_type, created_at)
+SELECT 1, 'test', 'test', 'general', now()
+FROM generate_series(1, 20);
+```
+
+Replace `1` with your actual user ID. Then call **POST /ai/explain** — you should get `429` with `"Daily limit of 20 AI requests reached. Try again tomorrow."` To clean up:
+
+```sql
+DELETE FROM ai_requests WHERE response = 'test';
+```
+
+### Test in the frontend
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and click **AI** in the navbar
+3. Type a question in the prompt box and click **Ask** (or press ⌘+Enter)
+4. Watch the "Analysing…" spinner, then the response card appears below
+5. Ask another question — the previous response moves to the history section
+6. Click any history item to expand the full response; click again to collapse
+
+**Suggested prompts to try:**
+
+| Prompt | What it tests |
+|---|---|
+| `Who are my favourite drivers?` | Context grounding — user's personal data |
+| `What are the current standings?` | Context grounding — top-10 standings table |
+| `What are my upcoming sessions?` | Context grounding — session schedule |
+| `Who won the last race?` | Missing data — should say GridPulse doesn't have that |
+| `What was Verstappen's fastest lap in Bahrain?` | Missing data — should refuse to invent a time |
+| `How does DRS work?` | General F1 knowledge — should explain and flag it as general knowledge |
+| `Who is on pole for the next race?` | Missing data — qualifying not in GridPulse |
+| `Who probably won the most races based on their points?` | Grounding guard — should not infer results from standings |
+
+**Test grounding edge cases:**
+
+- Ask for a race result — the AI should say "GridPulse doesn't have that data yet" not invent one
+- Ask "what's happening live right now?" — the AI should note it has no live feed and reference the snapshot timestamp
+- Ask about a concept like "what is undercut strategy?" — the AI should answer and label it as general F1 knowledge
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
+**AI Race Assistant (partial — Phase 10 complete, gaps remaining):**
+- Suggested prompt cards on the AI page — planned for a future UI pass
+- Multi-turn conversation threading — each question is currently independent (single-turn Q&A)
+- Streaming responses (WebSocket or Server-Sent Events)
+- Race results, qualifying data, and lap times in AI context — those data tables do not exist yet
+
+**Notifications:**
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
 - Per-qualifying position notifications — requires a `qualifying_results` table
-- Scheduled or automatic data sync — notification generation now runs inside the sync script, but the sync script itself must still be triggered manually or via a cron job
-- Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times from the API will be added in a future sync update
 - Push notifications
+
+**Data and sync:**
+- Scheduled or automatic data sync — notification generation runs inside the sync script, but the sync itself must still be triggered manually or via a cron job
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
-- AI features
-- Live race data
+- Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times will be added in a future sync update
+- OpenF1 or FastF1 integration for historical race results, qualifying, and lap times
+- Constructor standings endpoint
+- Team base location data
+
+**Infrastructure:**
+- Live race data of any kind
 - Race control messages
 - Tyre/pit stop data
-- Track map
+- Track map or circuit visualisation
 - Strategy analytics
 - WebSockets
 - Redis
 - Docker
-- OpenF1 or FastF1 integration
-- ML predictions
-- Scheduled or automatic data sync
-- Constructor standings endpoint
-- Team base location data
 - Alembic database migrations
+- ML predictions
 
 ---
 
@@ -1241,8 +1432,8 @@ In-app and optional email notifications for favourited drivers. Two notification
 **Phase 9.5 — Automated Notification Scheduling** *(complete)*
 Favourite-driver notification generation now runs automatically at the end of the F1 data sync script. A protected development endpoint (`POST /notifications/generate-favorite-driver-updates`) allows manual triggering without re-running the full sync.
 
-**Phase 10 — AI Race Assistant**
-A protected AI feature for signed-in users. Ask questions about races, drivers, and strategy grounded in real race data.
+**Phase 10 — AI Race Assistant** *(complete)*
+Protected `/ai` page for signed-in users. Ask questions about standings, favourite drivers, sessions, and reminders grounded in GridPulse database context. Groq (free tier) is the default provider; Anthropic is supported as an alternative. Responses are stored in `ai_requests` with a 20-request daily limit. The AI is explicitly grounded — it cannot invent race results, qualifying times, or live data.
 
 **Phase 11 — Live Race Dashboard**
 A second-screen race dashboard showing the live leaderboard, positions, pit status, tyre compounds, laps remaining, and race control messages.
