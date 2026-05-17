@@ -10,6 +10,7 @@ const publicNavLinks = [
 
 const authNavLinks = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/ai', label: 'AI' },
   { to: '/reminders', label: 'Reminders' },
   { to: '/notifications', label: 'Notifications' },
   { to: '/settings', label: 'Settings' },
