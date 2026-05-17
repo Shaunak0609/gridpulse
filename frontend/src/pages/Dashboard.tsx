@@ -296,6 +296,27 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/* AI Race Assistant shortcut */}
+      <section>
+        <Link
+          to="/ai"
+          className="group flex items-center gap-4 bg-gray-900 border border-gray-800 hover:border-red-500/40 rounded-xl px-5 py-4 transition-colors duration-200"
+        >
+          <div className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-gray-800 group-hover:bg-red-950/60 transition-colors duration-200">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l2 7h7l-5.5 4 2 7L12 16l-5.5 4 2-7L3 9h7z" />
+            </svg>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-white text-sm font-semibold">AI Race Assistant</p>
+            <p className="text-gray-500 text-xs mt-0.5">Ask questions about standings, sessions, and your favourites</p>
+          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-700 group-hover:text-gray-400 shrink-0 transition-colors duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+        </Link>
+      </section>
+
       {/* Recent Notifications — only shown when non-driver notifications exist */}
       {otherNotifs.length > 0 && (
         <section>
