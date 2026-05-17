@@ -43,6 +43,16 @@ def build_context(user: User, db: Session) -> str:
     """
     sections: list[str] = []
 
+    # ── Snapshot timestamp ────────────────────────────────────────────────────
+    # Giving the AI an explicit timestamp prevents it from making claims about
+    # "live" or "current" race events — it knows this is a database snapshot.
+    now = datetime.now(timezone.utc)
+    sections.append(_section("GridPulse Data Snapshot", [
+        f"  Retrieved : {_fmt_time(now)}",
+        "  Note      : This is a database snapshot. GridPulse has no live race feed.",
+        "              Do not describe any data in this context as 'live' or 'real-time'.",
+    ]))
+
     # ── User profile ─────────────────────────────────────────────────────────
     display_name = user.username or user.email.split("@")[0]
     sections.append(_section("User", [
@@ -91,7 +101,6 @@ def build_context(user: User, db: Session) -> str:
     sections.append(_section(heading, standing_lines))
 
     # ── Upcoming sessions ─────────────────────────────────────────────────────
-    now = datetime.now(timezone.utc)
     upcoming_sessions = (
         db.query(RaceSession)
         .filter(RaceSession.start_time > now)
