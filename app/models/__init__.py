@@ -9,3 +9,7 @@ from app.models.session import Session
 from app.models.favorite_driver import FavoriteDriver
 from app.models.favorite_team import FavoriteTeam
 from app.models.ai_request import AIRequest
+from app.models.lap import Lap
+from app.models.stint import Stint
+from app.models.race_control_message import RaceControlMessage
+from app.models.weather_sample import WeatherSample
