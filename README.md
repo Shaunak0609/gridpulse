@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 9
+## Current Status — Phase 9.5
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -117,6 +117,18 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend Reminders page — session reminders show a session-type badge (e.g. "Qualifying") and a colour-coded dot; race reminders show a "Race" badge
 - `scripts/seed_sessions.py` — seeds five standard sessions per race derived from each race's `start_date`; safe to run multiple times
 
+### Phase 9.5 — Automated Notification Scheduling (complete)
+
+- `scripts/sync_f1_data.py` extended — after all F1 data sync steps complete, both notification generators (`generate_standing_notifications` and `generate_wins_notifications`) are called automatically using the same open database session; each generator is wrapped in its own `try/except` so a failure in one does not prevent the other from running
+- Sync script output now includes a clear **Favourite Driver Notifications** section after the sync summary, with per-type result blocks showing created, skipped, and email counts
+- `POST /notifications/generate-favorite-driver-updates` — new protected development endpoint; requires a valid JWT Bearer token; calls both generators and returns a `NotificationGenerationSummary` JSON response with `users_checked`, `favorite_drivers_checked`, `notifications_created`, and `duplicates_skipped`; documented in `/docs` as a manual/development trigger
+- `NotificationGenerationSummary` Pydantic schema added to `app/schemas/notification.py`
+- `scripts/generate_favorite_driver_notifications.py` — standalone script is unchanged; continues to work independently for cases where you want to generate notifications without re-running a full data sync
+- Duplicate notification prevention is unchanged — both the sync flow and the endpoint rely on the same dedup logic inside each generator
+
+**Normal workflow from Phase 9.5 onwards:**
+Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favourite-driver notification generation in a single command.
+
 ### Phase 9 — Favourite Driver Notifications, Non-Live (complete)
 
 - `favorite_driver_notifications_enabled` boolean column added to the `users` table — controls in-app notification delivery per user (defaults to `true`; opt-out model)
@@ -139,13 +151,12 @@ This repository contains the backend API built with Python and FastAPI.
 
 | Type | Title | Trigger | Message example |
 |---|---|---|---|
-| `favorite_driver_standing` | Favourite driver update | Manual script run | "Max Verstappen is currently P1 in the 2026 driver standings with 136 points." |
-| `favorite_driver_wins` | Race wins update | Manual script run, only when wins > 0 | "Max Verstappen has 3 wins in the 2026 season." |
+| `favorite_driver_standing` | Favourite driver update | After data sync, or via dev endpoint | "Max Verstappen is currently P1 in the 2026 driver standings with 136 points." |
+| `favorite_driver_wins` | Race wins update | After data sync, or via dev endpoint, only when wins > 0 | "Max Verstappen has 3 wins in the 2026 season." |
 
 **What is not yet supported:**
 - Per-race finish position notifications — requires a `race_results` table (no race result data ingested yet)
 - Per-qualifying position notifications — requires a `qualifying_results` table
-- Automatic or scheduled notification generation — currently manual only via `scripts/generate_favorite_driver_notifications.py`
 - Live or real-time alerts of any kind
 
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
@@ -258,7 +269,7 @@ gridpulse/
 │   │   ├── calendar.py
 │   │   ├── standings.py
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
-│   │   ├── notifications.py      # GET/PUT/DELETE /notifications (Phase 6)
+│   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoint (Phase 6/9.5)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
 │   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
@@ -274,7 +285,7 @@ gridpulse/
 ├── scripts/
 │   ├── create_tables.py          # creates all tables including sessions
 │   ├── seed.py                   # inserts small local sample data (Phase 1)
-│   ├── sync_f1_data.py           # fetches and stores real F1 data from Jolpica
+│   ├── sync_f1_data.py           # fetches and stores real F1 data; runs notification generators after sync (Phase 9.5)
 │   ├── seed_sessions.py          # seeds 5 standard sessions per race (Phase 7.5)
 │   ├── migrate_add_email_preferences.py        # adds email preference columns to users (Phase 7)
 │   ├── migrate_add_reminder_email_tracking.py  # adds email_sent columns to reminders (Phase 7)
@@ -610,6 +621,7 @@ All notification endpoints require a valid JWT Bearer token.
 | GET | `/notifications` | Yes — Bearer token | List the current user's notifications, newest first |
 | PUT | `/notifications/{id}/read` | Yes — Bearer token | Mark a notification as read |
 | DELETE | `/notifications/{id}` | Yes — Bearer token | Delete a notification by ID |
+| POST | `/notifications/generate-favorite-driver-updates` | Yes — Bearer token | Development endpoint — manually trigger favourite-driver notification generation; returns a summary of created and skipped counts |
 
 ### Favourite endpoints
 
@@ -1104,13 +1116,81 @@ DELETE FROM notifications WHERE type IN ('favorite_driver_standing', 'favorite_d
 
 ---
 
+## Testing Automated Notification Scheduling
+
+### Test notifications running after data sync
+
+```bash
+# Clear existing driver notifications so you can see creation happen
+psql postgresql://your_username@localhost:5432/gridpulse_db \
+  -c "DELETE FROM notifications WHERE type IN ('favorite_driver_standing', 'favorite_driver_wins');"
+
+# Run the sync — notifications now run automatically at the end
+python scripts/sync_f1_data.py
+```
+
+Expected output (after the existing sync summary):
+
+```
+Data sync completed.
+
+Favourite-driver notification generation started.
+
+=== Favourite Driver Notifications ===
+
+[Standing Notifications]
+  Created                   : 1
+  Skipped (duplicate)       : 0
+  Skipped (no standing data): 0
+  Skipped (opted out)       : 0
+  Emails sent               : 1
+  Emails failed             : 0
+
+[Wins Notifications]
+  Created                   : 0
+  Skipped (duplicate)       : 0
+  Skipped (no wins yet)     : 1
+  Skipped (no standing data): 0
+  Skipped (opted out)       : 0
+```
+
+Run the sync again immediately — both generators should show `Created: 0` and the appropriate skip counts, confirming dedup works through the automated flow.
+
+### Test the dev trigger endpoint
+
+1. Start the backend: `uvicorn app.main:app --reload`
+2. Open `http://127.0.0.1:8000/docs`
+3. Log in via **POST /auth/login** and copy the `access_token`
+4. Click the **Authorize** padlock, paste the token, click **Authorize**
+5. Find **POST /notifications/generate-favorite-driver-updates** → **Try it out** → **Execute**
+6. First call (with existing notifications): response should show `notifications_created: 0` and `duplicates_skipped` matching your existing notification count
+7. Delete notifications from the `/notifications` page in the frontend, then call the endpoint again — `notifications_created` should be `1` or `2`
+8. Call it a second time — `notifications_created: 0`, `duplicates_skipped` reflects the newly created count
+
+### To set up a cron job (optional)
+
+To run the sync automatically on a schedule — for example, every Sunday at 06:00:
+
+```bash
+crontab -e
+```
+
+Add:
+```
+0 6 * * 0 cd /path/to/gridpulse && source venv/bin/activate && python scripts/sync_f1_data.py >> logs/sync.log 2>&1
+```
+
+No code changes are needed. The sync script already handles data refresh and notification generation in one command.
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
 
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
 - Per-qualifying position notifications — requires a `qualifying_results` table
-- Automatic or scheduled notification generation — currently manual only via `scripts/generate_favorite_driver_notifications.py`
+- Scheduled or automatic data sync — notification generation now runs inside the sync script, but the sync script itself must still be triggered manually or via a cron job
 - Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times from the API will be added in a future sync update
 - Push notifications
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
@@ -1156,7 +1236,10 @@ Sessions table and model for FP1–FP3, Sprint, Qualifying, and Race. Session-aw
 Users can favourite drivers and teams. A protected Dashboard page shows a personalised summary: favourite drivers and teams, upcoming sessions, reminders, and recent notifications. All times display in the user's local timezone.
 
 **Phase 9 — Favourite Driver Notifications, Non-Live** *(complete)*
-In-app and optional email notifications for favourited drivers. Two notification types are currently supported: a championship standings snapshot and a race wins update, both generated manually from existing `DriverStanding` data. Per-race and per-qualifying result notifications are planned once result tables are added.
+In-app and optional email notifications for favourited drivers. Two notification types are currently supported: a championship standings snapshot and a race wins update, both generated from existing `DriverStanding` data. Per-race and per-qualifying result notifications are planned once result tables are added.
+
+**Phase 9.5 — Automated Notification Scheduling** *(complete)*
+Favourite-driver notification generation now runs automatically at the end of the F1 data sync script. A protected development endpoint (`POST /notifications/generate-favorite-driver-updates`) allows manual triggering without re-running the full sync.
 
 **Phase 10 — AI Race Assistant**
 A protected AI feature for signed-in users. Ask questions about races, drivers, and strategy grounded in real race data.
