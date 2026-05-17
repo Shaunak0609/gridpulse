@@ -3,9 +3,14 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.database.database import get_db
+from app.models.favorite_driver import FavoriteDriver
 from app.models.notification import Notification
 from app.models.user import User
-from app.schemas.notification import NotificationResponse
+from app.schemas.notification import NotificationGenerationSummary, NotificationResponse
+from app.services.favorite_driver_notifications import (
+    generate_standing_notifications,
+    generate_wins_notifications,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -71,3 +76,32 @@ def delete_notification(
     notification = _get_owned_notification(notification_id, current_user, db)
     db.delete(notification)
     db.commit()
+
+
+@router.post(
+    "/generate-favorite-driver-updates",
+    response_model=NotificationGenerationSummary,
+    summary="[Dev] Manually trigger favourite-driver notification generation",
+    description=(
+        "Development/manual endpoint. Runs the favourite-driver notification "
+        "generators (standings snapshot and race wins) for all users and their "
+        "favourited drivers. Duplicate notifications are skipped automatically. "
+        "This is the same logic that runs automatically at the end of the F1 "
+        "data sync script."
+    ),
+)
+def generate_favorite_driver_updates(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    users_checked = db.query(FavoriteDriver.user_id).distinct().count()
+
+    standing = generate_standing_notifications(db)
+    wins = generate_wins_notifications(db)
+
+    return NotificationGenerationSummary(
+        users_checked=users_checked,
+        favorite_drivers_checked=standing["checked"],
+        notifications_created=standing["created"] + wins["created"],
+        duplicates_skipped=standing["skipped_duplicate"] + wins["skipped_duplicate"],
+    )

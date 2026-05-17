@@ -3,6 +3,13 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class NotificationGenerationSummary(BaseModel):
+    users_checked: int
+    favorite_drivers_checked: int
+    notifications_created: int
+    duplicates_skipped: int
+
+
 class NotificationResponse(BaseModel):
     id: int
     user_id: int
