@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
+from app.models.driver import Driver
 from app.models.favorite_driver import FavoriteDriver
 from app.models.favorite_team import FavoriteTeam
 from app.models.lap import Lap
@@ -106,18 +107,23 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     if not laps:
         return None
 
-    # Build per-driver summary: total laps and their last lap's start time.
-    driver_last: dict[int, tuple[int, datetime | None]] = {}
-    for lap in laps:
-        dn = lap.driver_number
-        if dn not in driver_last or lap.lap_number > driver_last[dn][0]:
-            driver_last[dn] = (lap.lap_number, lap.date_start)
+    # Build driver number → name map from the drivers table so we show names,
+    # not just numbers. Numbers are kept in brackets for cross-reference.
+    driver_name_map: dict[int, str] = {
+        d.driver_number: d.full_name
+        for d in db.query(Driver).all()
+        if d.driver_number is not None
+    }
 
-    # Count total laps per driver.
+    # Build per-driver summary: total laps and their last lap's start time.
     from collections import defaultdict
+    driver_last: dict[int, tuple[int, datetime | None]] = {}
     lap_counts: dict[int, int] = defaultdict(int)
     for lap in laps:
-        lap_counts[lap.driver_number] += 1
+        dn = lap.driver_number
+        lap_counts[dn] += 1
+        if dn not in driver_last or lap.lap_number > driver_last[dn][0]:
+            driver_last[dn] = (lap.lap_number, lap.date_start)
 
     _far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
 
@@ -132,9 +138,10 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     max_laps = max(lap_counts.values())
     lines: list[str] = []
     for pos, dn in enumerate(ordered, 1):
+        name = driver_name_map.get(dn, f"Driver #{dn}")
         laps_behind = max_laps - lap_counts[dn]
         suffix = f"  (+{laps_behind} lap{'s' if laps_behind != 1 else ''})" if laps_behind else ""
-        lines.append(f"    P{pos}. Driver #{dn}{suffix}")
+        lines.append(f"    P{pos}. {name} (#{dn}){suffix}")
 
     return lines
 
@@ -359,14 +366,15 @@ def build_context(user: User, db: Session) -> str:
 
     # ── Explicit data limitations ─────────────────────────────────────────────
     sections.append(_section("Data NOT Available in GridPulse", [
-        "  - Individual race results (finishing positions per race)",
-        "  - Qualifying results and grid positions",
-        "  - Live race timing of any kind",
+        "  - Official race classifications (finishing positions above are derived",
+        "    from lap timing — post-race penalties/DSQs are not reflected)",
+        "  - Qualifying results, grid positions, or pole lap times",
+        "  - Individual lap times per driver (only aggregate counts are stored)",
+        "  - Pit stop durations or exact pit timing",
+        "  - Live race timing or telemetry of any kind",
         "  - Car telemetry (speed traces, throttle, brake, GPS position)",
-        "  - FastF1 positional or sector-level telemetry data",
-        "  - Pit stop duration or undercut/overcut analysis",
-        "  Note: Lap times, tyre compounds, and weather are stored for synced",
-        "        sessions and summarised above — but not all sessions are synced.",
+        "  Note: Tyre compounds, weather, and race control messages are stored",
+        "        only for sessions that have been synced via the OpenF1 sync script.",
     ]))
 
     return "\n\n".join(sections)
