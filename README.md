@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 10
+## Current Status — Phase 11
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -218,6 +218,80 @@ AI_MODEL=llama-3.1-8b-instant
 - Streaming responses
 - Race results, qualifying data, or lap times in AI context — those data tables do not exist yet
 
+### Phase 11 — OpenF1 / FastF1 Historical Data Upgrade (complete)
+
+Phase 11 adds historical session data to GridPulse using the OpenF1 public API. Laps, stints, race control messages, and weather samples are fetched, stored in PostgreSQL, served via REST endpoints, displayed in a dedicated session detail page, and made available as summarised context for the AI assistant.
+
+**What Phase 11 added:**
+
+- `app/services/openf1_client.py` — HTTP client for the OpenF1 public API (`api.openf1.org/v1`). Functions: `fetch_meetings`, `fetch_sessions`, `fetch_session`, `fetch_drivers`, `fetch_laps`, `fetch_stints`, `fetch_pit_stops`, `fetch_race_control`, `fetch_weather`. A shared `_get(path, params)` helper handles all requests with a 30 s timeout. `BASE_URL` is configurable via the `OPENF1_BASE_URL` environment variable.
+
+- `sessions` table extended with OpenF1 link fields: `openf1_session_key`, `openf1_meeting_key`, `circuit_short_name`, `country_name`. A partial unique index prevents duplicate keys (`WHERE openf1_session_key IS NOT NULL`).
+
+- Four new historical data models and tables:
+
+  | Model | Table | Key fields |
+  |---|---|---|
+  | `Lap` | `laps` | `session_id`, `driver_number`, `lap_number`, `lap_duration`, `duration_sector_1/2/3`, `is_pit_out_lap`, `date_start` |
+  | `Stint` | `stints` | `session_id`, `driver_number`, `stint_number`, `compound`, `lap_start`, `lap_end`, `tyre_age_at_start` |
+  | `RaceControlMessage` | `race_control_messages` | `session_id`, `date`, `lap_number`, `category`, `message`, `flag`, `scope`, `sector`, `driver_number` |
+  | `WeatherSample` | `weather_samples` | `session_id`, `date`, `air_temperature`, `track_temperature`, `humidity`, `rainfall`, `wind_speed`, `wind_direction` |
+
+- Pydantic response schemas: `LapResponse`, `StintResponse`, `RaceControlMessageResponse`, `WeatherSampleResponse`, `SessionDetailResponse` (includes `race_name`, `circuit_short_name`, `country_name`, `openf1_session_key`).
+
+- `app/services/openf1_ingestion.py` — five ingestion functions:
+  - `link_session(session_key, db)` — fetches OpenF1 session metadata, maps session name to our internal type (e.g. "Practice 1" → "fp1"), finds the matching race by date proximity (4-day window), and writes the OpenF1 identifiers into the local session row
+  - `ingest_laps(session_id, session_key, db)` — bulk-inserts laps, skipping existing `(driver_number, lap_number)` pairs
+  - `ingest_stints(session_id, session_key, db)` — bulk-inserts stints, skipping existing `(driver_number, stint_number)` pairs
+  - `ingest_race_control(session_id, session_key, db)` — deletes all existing messages for the session and reinserts from OpenF1 (no reliable unique key exists)
+  - `ingest_weather(session_id, session_key, db)` — bulk-inserts samples, skipping existing timestamps. Converts OpenF1's integer rainfall (0/1) to Python bool.
+
+- `scripts/sync_openf1_session.py` — CLI sync script with two modes:
+  - `--list YEAR` — prints all OpenF1 sessions for the given year with session key, name, circuit, and date
+  - `--session-key KEY` — runs all five ingestion steps for one session and prints inserted/skipped counts
+
+- Five new backend endpoints (public, no auth required):
+
+  | Method | Endpoint | Description |
+  |---|---|---|
+  | GET | `/sessions/{session_id}` | Single session with race name and OpenF1 link metadata |
+  | GET | `/sessions/{session_id}/laps` | All laps, ordered by driver number then lap number |
+  | GET | `/sessions/{session_id}/stints` | All stints, ordered by driver number then lap start |
+  | GET | `/sessions/{session_id}/race-control` | All race control messages, ordered by timestamp |
+  | GET | `/sessions/{session_id}/weather` | All weather samples, ordered by timestamp |
+
+- Frontend `/sessions/:id` page — public route; displays four data sections for a synced session:
+  - **Laps** — driver summary table: lap count, fastest lap time (pit-out laps excluded), pit-out count
+  - **Stints** — flat table with colour-coded compound badges (SOFT/MEDIUM/HARD/INTERMEDIATE/WET)
+  - **Race Control** — chronological message list with lap number and flag badges
+  - **Weather** — summary stats (temp range, rain, readings count) plus scrollable readings table
+  - All sections show a "No data synced yet" empty state until the sync script is run
+  - Header shows "Data synced" / "Not synced" badge based on `openf1_session_key`
+
+- Calendar page updated — past session names are now clickable links to `/sessions/:id`.
+
+- `app/services/ai_context.py` updated — includes historical data summaries for the last 3 synced sessions:
+  - Lap count and number of drivers (aggregate only — no raw rows dumped)
+  - Tyre/stint summary: total stints with compound breakdown (e.g. "40 stints — 16×SOFT, 14×MEDIUM, 10×HARD")
+  - Weather summary: air and track temperature range, rain status, reading count
+  - Last 6 race control messages verbatim, with lap number and flag
+  - Explicit "no data synced" message if no sessions have been linked yet
+  - "Data NOT Available" section updated: lap times, tyre data, and weather are now noted as stored-but-summarised; pit stop durations, live timing, and FastF1 telemetry remain absent
+
+- Migration scripts:
+  - `scripts/migrate_add_openf1_session_fields.py` — adds the four OpenF1 columns to the existing sessions table
+  - `scripts/migrate_create_openf1_tables.py` — creates the four new historical data tables
+
+**FastF1 planning:**
+FastF1 is a Python library providing car telemetry (speed, throttle, brake, RPM, gear, DRS) and GPS position data that OpenF1 does not offer. Integration is planned for a later phase when track map and advanced analytics features are ready. FastF1 is not used in Phase 11 — OpenF1 covers all Phase 11 requirements via REST. See the FastF1 planning notes below.
+
+**What is not yet included in Phase 11:**
+- Individual lap times per driver are stored but not yet used in charts or analytics — that is Phase 12+
+- Qualifying results and finishing positions — no `race_results` or `qualifying_results` table exists yet
+- FastF1 telemetry data (speed traces, GPS position, braking points)
+- Automatic session sync — the sync script must be run manually
+- Constructor standings data
+
 ---
 
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
@@ -254,7 +328,7 @@ AI_MODEL=llama-3.1-8b-instant
 | ORM | SQLAlchemy |
 | Data validation | Pydantic |
 | Server | Uvicorn |
-| External data | Jolpica F1 API |
+| External data | Jolpica F1 API, OpenF1 API |
 | HTTP client | requests |
 | Environment | python-dotenv |
 | Password hashing | passlib + bcrypt |
@@ -288,6 +362,20 @@ Data is fetched manually and stored in PostgreSQL. The app serves data from its 
 - Podium counts are not included in standings — this field is `0` for all drivers.
 - Constructor names use Jolpica's short forms, for example `"Red Bull"` instead of `"Red Bull Racing"` and `"Sauber"` instead of `"Kick Sauber"`.
 
+**OpenF1 API** — `https://api.openf1.org/v1`
+
+OpenF1 is a free, public F1 data API with no authentication required. GridPulse uses it to fetch historical session data:
+
+| Data | OpenF1 endpoint |
+|---|---|
+| Session metadata | `/sessions?session_key={key}` |
+| Lap times | `/laps?session_key={key}` |
+| Stint and tyre data | `/stints?session_key={key}` |
+| Race control messages | `/race_control?session_key={key}` |
+| Weather samples | `/weather?session_key={key}` |
+
+Data is fetched manually via the sync script and stored in PostgreSQL. OpenF1 coverage begins from the 2023 season. It does not provide car telemetry (speed, throttle, GPS position) — that requires FastF1, which is planned for a later phase.
+
 ---
 
 ## Project Structure
@@ -312,7 +400,11 @@ gridpulse/
 │   │   ├── session.py            # Session model (Phase 7.5)
 │   │   ├── favorite_driver.py    # FavoriteDriver model — user/driver join table (Phase 8)
 │   │   ├── favorite_team.py      # FavoriteTeam model — user/team join table (Phase 8)
-│   │   └── ai_request.py         # AIRequest model — stores prompt, response, tokens (Phase 10)
+│   │   ├── ai_request.py         # AIRequest model — stores prompt, response, tokens (Phase 10)
+│   │   ├── lap.py                # Lap model — per-driver lap times from OpenF1 (Phase 11)
+│   │   ├── stint.py              # Stint model — tyre stint data from OpenF1 (Phase 11)
+│   │   ├── race_control_message.py  # RaceControlMessage model — steward/flag messages (Phase 11)
+│   │   └── weather_sample.py     # WeatherSample model — trackside weather readings (Phase 11)
 │   ├── schemas/
 │   │   ├── team.py
 │   │   ├── driver.py
@@ -321,10 +413,14 @@ gridpulse/
 │   │   ├── user.py               # UserCreate, UserLogin, UserResponse, Token
 │   │   ├── reminder.py           # ReminderCreate/Response with optional session_id (Phase 6/7.5)
 │   │   ├── notification.py       # NotificationResponse (Phase 6)
-│   │   ├── session.py            # SessionCreate, SessionResponse (Phase 7.5)
+│   │   ├── session.py            # SessionCreate, SessionResponse, SessionDetailResponse (Phase 7.5/11)
 │   │   ├── favorite.py           # FavoriteDriverResponse, FavoriteTeamResponse + nested info schemas (Phase 8)
 │   │   ├── dashboard.py          # DashboardResponse — assembles all sections (Phase 8)
-│   │   └── ai.py                 # AIRequestCreate, AIResponse, AIHistoryResponse (Phase 10)
+│   │   ├── ai.py                 # AIRequestCreate, AIResponse, AIHistoryResponse (Phase 10)
+│   │   ├── lap.py                # LapResponse (Phase 11)
+│   │   ├── stint.py              # StintResponse (Phase 11)
+│   │   ├── race_control_message.py  # RaceControlMessageResponse (Phase 11)
+│   │   └── weather_sample.py     # WeatherSampleResponse (Phase 11)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -336,7 +432,7 @@ gridpulse/
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
 │   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoint (Phase 6/9.5)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
-│   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions (Phase 7.5)
+│   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions, GET /sessions/{id}, historical data endpoints (Phase 7.5/11)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
 │   │   ├── dashboard.py          # GET /me/dashboard (Phase 8)
 │   │   └── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
@@ -347,7 +443,9 @@ gridpulse/
 │   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
 │   │   ├── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
 │   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic (Phase 10)
-│   │   └── ai_context.py         # builds plain-text GridPulse context for AI prompts (Phase 10)
+│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; includes historical session summaries (Phase 10/11)
+│   │   ├── openf1_client.py      # HTTP client for OpenF1 API — fetch_laps, fetch_stints, fetch_race_control, fetch_weather, etc. (Phase 11)
+│   │   └── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -362,6 +460,9 @@ gridpulse/
 │   ├── migrate_create_favorites_tables.py           # creates favorite_drivers and favorite_teams tables (Phase 8)
 │   ├── migrate_add_favorite_driver_notifications.py # adds favorite_driver_notifications_enabled to users (Phase 9)
 │   ├── migrate_create_ai_requests_table.py          # creates ai_requests table (Phase 10)
+│   ├── migrate_add_openf1_session_fields.py         # adds openf1_session_key and related columns to sessions (Phase 11)
+│   ├── migrate_create_openf1_tables.py              # creates laps, stints, race_control_messages, weather_samples (Phase 11)
+│   ├── sync_openf1_session.py                       # CLI: --list YEAR or --session-key KEY to sync historical data (Phase 11)
 │   ├── send_due_reminder_emails.py                  # CLI script to send due reminder emails (Phase 7)
 │   └── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
 ├── .env                          # local environment variables (not committed)
@@ -656,6 +757,11 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/standings/drivers` | Driver championship standings |
 | GET | `/races/{race_id}/sessions` | All sessions for a specific race, ordered by start time |
 | GET | `/sessions/upcoming` | Next N upcoming sessions for the current season (default 10, max 50) |
+| GET | `/sessions/{session_id}` | Single session with race name, circuit, country, and OpenF1 link status |
+| GET | `/sessions/{session_id}/laps` | All stored laps for a session, ordered by driver number then lap number |
+| GET | `/sessions/{session_id}/stints` | All stored stints for a session, ordered by driver number then lap start |
+| GET | `/sessions/{session_id}/race-control` | All stored race control messages for a session, ordered by timestamp |
+| GET | `/sessions/{session_id}/weather` | All stored weather samples for a session, ordered by timestamp |
 
 ### Authentication endpoints
 
@@ -1366,6 +1472,195 @@ DELETE FROM ai_requests WHERE response = 'test';
 
 ---
 
+## OpenF1 Session Sync
+
+### Run the migrations (existing databases only)
+
+If your database was created before Phase 11, run both migration scripts first:
+
+```bash
+python scripts/migrate_add_openf1_session_fields.py
+python scripts/migrate_create_openf1_tables.py
+```
+
+Both scripts use `IF NOT EXISTS` and are safe to run more than once. Fresh databases created with `create_tables.py` include all Phase 11 tables automatically.
+
+### List available sessions
+
+To find the `session_key` for a session you want to sync:
+
+```bash
+python scripts/sync_openf1_session.py --list 2024
+```
+
+Expected output:
+
+```
+session_key    session_name           circuit                        date_start
+--------------------------------------------------------------------------------------
+9149           Practice 1             Bahrain                        2024-02-29T11:30:00+00:00
+9150           Practice 2             Bahrain                        2024-02-29T15:00:00+00:00
+9151           Qualifying             Bahrain                        2024-03-01T15:00:00+00:00
+9158           Race                   Bahrain                        2024-03-02T15:00:00+00:00
+...
+```
+
+### Sync a session
+
+```bash
+python scripts/sync_openf1_session.py --session-key 9158
+```
+
+Expected output:
+
+```
+=== Syncing session_key=9158 ===
+
+Step 1/5 — Linking session...
+  Linked session_key=9158 → sessions.id=5 (Bahrain Grand Prix — Race)
+  session_id=5
+
+Step 2/5 — Ingesting weather samples...
+  inserted=112  skipped=0
+
+Step 3/5 — Ingesting race control messages...
+  inserted=34  deleted(replaced)=0
+
+Step 4/5 — Ingesting stints...
+  inserted=40  skipped=0
+
+Step 5/5 — Ingesting laps...
+  inserted=1140  skipped=0
+
+=== Sync complete ===
+  Weather samples : 112 inserted
+  Race control    : 34 inserted (0 replaced)
+  Stints          : 40 inserted
+  Laps            : 1140 inserted
+```
+
+Running the sync again for the same session is safe — existing rows are skipped (laps, stints, weather) or replaced (race control messages).
+
+### Verify synced data in PostgreSQL
+
+After syncing a session, connect to psql and check the tables:
+
+```bash
+psql postgresql://your_username@localhost:5432/gridpulse_db
+```
+
+```sql
+-- Check the session was linked
+SELECT id, session_name, openf1_session_key, circuit_short_name, country_name
+FROM sessions
+WHERE openf1_session_key IS NOT NULL;
+
+-- Count laps per driver
+SELECT driver_number, COUNT(*) AS laps
+FROM laps
+WHERE session_id = 5
+GROUP BY driver_number
+ORDER BY driver_number;
+
+-- Fastest lap per driver (excluding pit-out laps)
+SELECT driver_number, MIN(lap_duration) AS fastest_lap
+FROM laps
+WHERE session_id = 5
+  AND is_pit_out_lap = false
+  AND lap_duration IS NOT NULL
+GROUP BY driver_number
+ORDER BY fastest_lap;
+
+-- Tyre compounds used
+SELECT compound, COUNT(*) AS stints
+FROM stints
+WHERE session_id = 5
+  AND compound IS NOT NULL
+GROUP BY compound
+ORDER BY stints DESC;
+
+-- Race control messages
+SELECT date, lap_number, flag, message
+FROM race_control_messages
+WHERE session_id = 5
+ORDER BY date;
+
+-- Weather range
+SELECT
+  MIN(air_temperature) AS air_min,
+  MAX(air_temperature) AS air_max,
+  MIN(track_temperature) AS track_min,
+  MAX(track_temperature) AS track_max,
+  BOOL_OR(rainfall) AS had_rain,
+  COUNT(*) AS readings
+FROM weather_samples
+WHERE session_id = 5;
+```
+
+### Test the historical data endpoints
+
+Start the backend and test each endpoint:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+```bash
+# Get session detail (replace 5 with your actual session_id)
+curl http://localhost:8000/sessions/5 | python3 -m json.tool
+
+# Laps (returns per-driver per-lap rows)
+curl http://localhost:8000/sessions/5/laps | python3 -m json.tool | head -60
+
+# Stints
+curl http://localhost:8000/sessions/5/stints | python3 -m json.tool
+
+# Race control messages
+curl http://localhost:8000/sessions/5/race-control | python3 -m json.tool
+
+# Weather samples
+curl http://localhost:8000/sessions/5/weather | python3 -m json.tool | head -40
+
+# 404 for non-existent session
+curl -i http://localhost:8000/sessions/99999/laps
+```
+
+### Test the session detail page
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Go to `/calendar` and expand any past race
+3. Past session names are now underlined links — click one to open `/sessions/:id`
+4. Before syncing: all four sections show "No data synced yet" and the header shows "Not synced"
+5. After syncing (run the sync script above): the page fills in with lap counts, compound badges, race control messages, and weather stats
+6. The header shows a green "Data synced" badge
+
+---
+
+## FastF1 — Future Integration Plan
+
+FastF1 is a Python library (not used in Phase 11) that provides data OpenF1 does not:
+
+| Capability | OpenF1 | FastF1 |
+|---|---|---|
+| Lap times, stints, race control, weather | Yes | Yes |
+| Car telemetry (speed, throttle, brake, RPM, gear, DRS) | No | Yes |
+| GPS position data (X/Y on track) | No | Yes |
+| Driver vs driver lap telemetry overlays | No | Yes |
+| Track map geometry | No | Yes |
+| Historical seasons before 2023 | Limited | Yes |
+| Pre-built Pandas DataFrames | No | Yes |
+
+**When to use FastF1 instead of OpenF1:**
+Use OpenF1 for anything quickly fetchable via REST — laps, stints, race control, weather. Use FastF1 for anything that requires "what happened on track": speed traces, braking points, car position, lap delta comparisons between drivers.
+
+**Caching concerns:**
+FastF1 downloads session data from F1's servers and caches it locally as `.ff1pkl` files. A full race weekend's telemetry cache is 300–600 MB. The first load of a session can take 30–90 seconds. FastF1 must never run in a request/response cycle — only in background jobs or pre-ingestion scripts. A `fastf1.Cache.enable_cache('/path/to/cache')` call is required before any session load, and the cache path must be on persistent storage.
+
+**Why FastF1 is delayed:**
+FastF1 data (telemetry, track maps, driver comparisons) is meaningless without a chart or visualisation layer to display it. The right sequence is to build the display layer first, then pull in the data source that feeds it. FastF1 also adds heavy dependencies (`pandas`, `numpy`, `matplotlib`) and a cache architecture decision that belongs in the analytics phase, not in the current lightweight ingestion layer.
+
+---
+
 ## What Is Not Included Yet
 
 The following features are planned but not yet built:
@@ -1374,7 +1669,13 @@ The following features are planned but not yet built:
 - Suggested prompt cards on the AI page — planned for a future UI pass
 - Multi-turn conversation threading — each question is currently independent (single-turn Q&A)
 - Streaming responses (WebSocket or Server-Sent Events)
-- Race results, qualifying data, and lap times in AI context — those data tables do not exist yet
+
+**Historical data (partial — Phase 11 complete, gaps remaining):**
+- Individual race results and finishing positions — no `race_results` table yet
+- Qualifying results and grid positions — no `qualifying_results` table yet
+- Lap time charts and analytics — data is stored but visualisations are Phase 12+
+- Automatic session sync — the sync script must still be run manually
+- FastF1 telemetry (speed traces, throttle, GPS position) — planned for analytics phase
 
 **Notifications:**
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
@@ -1385,16 +1686,11 @@ The following features are planned but not yet built:
 - Scheduled or automatic data sync — notification generation runs inside the sync script, but the sync itself must still be triggered manually or via a cron job
 - Scheduled or automatic reminder delivery — the delivery logic exists but no background job or cron runs it yet; use `scripts/send_due_reminder_emails.py` or `POST /email/send-due-reminders` manually for now
 - Session times are seeded from approximate UTC values, not pulled live from Jolpica — real session times will be added in a future sync update
-- OpenF1 or FastF1 integration for historical race results, qualifying, and lap times
 - Constructor standings endpoint
 - Team base location data
 
 **Infrastructure:**
 - Live race data of any kind
-- Race control messages
-- Tyre/pit stop data
-- Track map or circuit visualisation
-- Strategy analytics
 - WebSockets
 - Redis
 - Docker
@@ -1435,17 +1731,29 @@ Favourite-driver notification generation now runs automatically at the end of th
 **Phase 10 — AI Race Assistant** *(complete)*
 Protected `/ai` page for signed-in users. Ask questions about standings, favourite drivers, sessions, and reminders grounded in GridPulse database context. Groq (free tier) is the default provider; Anthropic is supported as an alternative. Responses are stored in `ai_requests` with a 20-request daily limit. The AI is explicitly grounded — it cannot invent race results, qualifying times, or live data.
 
-**Phase 11 — Live Race Dashboard**
-A second-screen race dashboard showing the live leaderboard, positions, pit status, tyre compounds, laps remaining, and race control messages.
+**Phase 11 — OpenF1 / FastF1 Historical Data Upgrade** *(complete)*
+OpenF1 API client, ingestion service, and sync script. Four new tables: laps, stints, race control messages, weather samples. Five new REST endpoints. Session detail frontend page at `/sessions/:id`. AI context updated to include historical session summaries.
 
-**Phase 12 — Track Map Visualisation**
-A circuit map showing driver positions moving around the track in real time or historical replay.
+**Phase 12 — Live/Historical Race Dashboard**
+A second-screen race dashboard using stored historical data. Leaderboard-style lap and position data, race control messages, stint and tyre context, weather conditions, and favourite-driver highlighting.
 
-**Phase 13 — Advanced Analytics**
-Tyre strategy visualiser, pit stop comparison, pace charts, driver and team comparisons, and sector analysis.
+**Phase 13 — Strategy Dashboard**
+Tyre strategy timeline, stint history per driver, pit window context, tyre degradation trends, and pit stop comparison.
 
-**Phase 14 — ML Prediction Layer**
-Machine learning models for podium prediction, pit window estimation, and race outcome simulation.
+**Phase 14 — Advanced Analytics**
+Driver comparison, team comparison, pace trends, lap time charts, qualifying vs race pace, teammate delta, and analytics visualisations.
+
+**Phase 15 — Live Favourite Driver Alerts**
+Real-time or replay-based alerts for favourited drivers: gained/lost positions, pit events, compound changes, penalties, investigations, fastest lap, retirement, gap changes.
+
+**Phase 16 — Docker, Testing, CI/CD, and Deployment**
+Docker and Docker Compose setup, automated tests, CI/CD pipeline, and production-style deployment configuration.
+
+**Phase 17 — ML Prediction Layer**
+Machine learning models for podium prediction, pit window estimation, tyre degradation prediction, and race outcome simulation.
+
+**Phase 18 — Mobile App**
+React Native / Expo mobile app consuming the same FastAPI backend.
 
 ---
 
