@@ -93,11 +93,15 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     Derive approximate finishing order from lap data for race and sprint sessions.
 
     Method:
-      - Drivers with more laps finished ahead of drivers with fewer laps.
-      - Among drivers on the same lap count, the one whose final lap started
-        earliest finished first (they crossed the line first).
+      - Sort by maximum lap_number (not row count). OpenF1 sometimes records a
+        lap 0 (formation/pre-race out-lap) for some drivers but not others, which
+        inflates the row count without reflecting additional race distance covered.
+        Maximum lap_number is the reliable measure of race completion.
+      - Among drivers with the same maximum lap_number, the one whose final lap
+        started earliest crossed the finish line first.
 
-    This is an approximation from timing data — not official race results.
+    This is an approximation — not official results. Post-race penalties and
+    disqualifications are not reflected.
     Returns None for non-race sessions or when no lap data is stored.
     """
     if session_type not in ("race", "sprint"):
@@ -115,13 +119,11 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
         if d.driver_number is not None
     }
 
-    # Build per-driver summary: total laps and their last lap's start time.
-    from collections import defaultdict
+    # For each driver track: (max_lap_number, date_start of that lap).
+    # Using max lap_number — not row count — avoids being misled by lap 0 rows.
     driver_last: dict[int, tuple[int, datetime | None]] = {}
-    lap_counts: dict[int, int] = defaultdict(int)
     for lap in laps:
         dn = lap.driver_number
-        lap_counts[dn] += 1
         if dn not in driver_last or lap.lap_number > driver_last[dn][0]:
             driver_last[dn] = (lap.lap_number, lap.date_start)
 
@@ -130,16 +132,16 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     ordered = sorted(
         driver_last.keys(),
         key=lambda dn: (
-            -lap_counts[dn],                              # more laps = ahead
-            driver_last[dn][1] or _far_future,           # earlier last-lap start = ahead
+            -driver_last[dn][0],                          # higher max lap_number = ahead
+            driver_last[dn][1] or _far_future,            # earlier last-lap start = ahead
         ),
     )
 
-    max_laps = max(lap_counts.values())
+    max_lap_number = max(v[0] for v in driver_last.values())
     lines: list[str] = []
     for pos, dn in enumerate(ordered, 1):
         name = driver_name_map.get(dn, f"Driver #{dn}")
-        laps_behind = max_laps - lap_counts[dn]
+        laps_behind = max_lap_number - driver_last[dn][0]
         suffix = f"  (+{laps_behind} lap{'s' if laps_behind != 1 else ''})" if laps_behind else ""
         lines.append(f"    P{pos}. {name} (#{dn}){suffix}")
 
