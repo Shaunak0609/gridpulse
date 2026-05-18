@@ -1,4 +1,4 @@
-import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, LoginPayload, Notification, NotificationPreferences, Race, Reminder, ReminderCreate, Session, SignupPayload, Team, TokenResponse } from '../types'
+import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionDetail, SignupPayload, Stint, Team, TokenResponse, WeatherSample } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -41,6 +41,21 @@ export const getUpcomingSessions = (limit = 10) =>
 
 export const getRaceSessions = (raceId: number) =>
   get<Session[]>(`/races/${raceId}/sessions`)
+
+export const getSession = (id: number) =>
+  get<SessionDetail>(`/sessions/${id}`)
+
+export const getSessionLaps = (id: number) =>
+  get<Lap[]>(`/sessions/${id}/laps`)
+
+export const getSessionStints = (id: number) =>
+  get<Stint[]>(`/sessions/${id}/stints`)
+
+export const getSessionRaceControl = (id: number) =>
+  get<RaceControlMessage[]>(`/sessions/${id}/race-control`)
+
+export const getSessionWeather = (id: number) =>
+  get<WeatherSample[]>(`/sessions/${id}/weather`)
 
 // ─── Auth endpoints ──────────────────────────────────────────────────────────
 

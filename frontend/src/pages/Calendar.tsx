@@ -150,10 +150,19 @@ function SessionPanel({
               {/* Session type dot */}
               <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotColor}`} />
 
-              {/* Session name */}
-              <span className={`text-xs font-medium w-28 shrink-0 ${past ? 'text-gray-500' : 'text-gray-300'}`}>
-                {session.session_name}
-              </span>
+              {/* Session name — links to detail page for past sessions */}
+              {past ? (
+                <Link
+                  to={`/sessions/${session.id}`}
+                  className="text-xs font-medium w-28 shrink-0 text-gray-500 hover:text-gray-300 transition-colors underline-offset-2 hover:underline"
+                >
+                  {session.session_name}
+                </Link>
+              ) : (
+                <span className="text-xs font-medium w-28 shrink-0 text-gray-300">
+                  {session.session_name}
+                </span>
+              )}
 
               {/* Time */}
               <span className="text-xs text-gray-600 font-mono flex-1">

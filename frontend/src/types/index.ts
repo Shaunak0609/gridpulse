@@ -178,3 +178,66 @@ export interface AIUsage {
   daily_limit: number
   remaining: number
 }
+
+export interface SessionDetail {
+  id: number
+  race_id: number
+  session_type: string
+  session_name: string
+  start_time: string | null
+  end_time: string | null
+  timezone: string | null
+  circuit_short_name: string | null
+  country_name: string | null
+  openf1_session_key: number | null
+  race_name: string | null
+}
+
+export interface Lap {
+  id: number
+  session_id: number
+  driver_number: number
+  lap_number: number
+  lap_duration: number | null
+  duration_sector_1: number | null
+  duration_sector_2: number | null
+  duration_sector_3: number | null
+  is_pit_out_lap: boolean
+  date_start: string | null
+}
+
+export interface Stint {
+  id: number
+  session_id: number
+  driver_number: number
+  stint_number: number | null
+  compound: string | null
+  lap_start: number | null
+  lap_end: number | null
+  tyre_age_at_start: number | null
+}
+
+export interface RaceControlMessage {
+  id: number
+  session_id: number
+  date: string | null
+  lap_number: number | null
+  category: string | null
+  message: string
+  flag: string | null
+  scope: string | null
+  sector: number | null
+  driver_number: number | null
+}
+
+export interface WeatherSample {
+  id: number
+  session_id: number
+  date: string | null
+  air_temperature: number | null
+  track_temperature: number | null
+  humidity: number | null
+  rainfall: boolean | null
+  wind_speed: number | null
+  wind_direction: number | null
+}
