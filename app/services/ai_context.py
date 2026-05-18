@@ -87,6 +87,58 @@ def _stint_summary(session_id: int, db: Session) -> str | None:
     return f"{len(stints)} stints — {breakdown}"
 
 
+def _finishing_order(session_id: int, session_type: str, db: Session) -> list[str] | None:
+    """
+    Derive approximate finishing order from lap data for race and sprint sessions.
+
+    Method:
+      - Drivers with more laps finished ahead of drivers with fewer laps.
+      - Among drivers on the same lap count, the one whose final lap started
+        earliest finished first (they crossed the line first).
+
+    This is an approximation from timing data — not official race results.
+    Returns None for non-race sessions or when no lap data is stored.
+    """
+    if session_type not in ("race", "sprint"):
+        return None
+
+    laps = db.query(Lap).filter(Lap.session_id == session_id).all()
+    if not laps:
+        return None
+
+    # Build per-driver summary: total laps and their last lap's start time.
+    driver_last: dict[int, tuple[int, datetime | None]] = {}
+    for lap in laps:
+        dn = lap.driver_number
+        if dn not in driver_last or lap.lap_number > driver_last[dn][0]:
+            driver_last[dn] = (lap.lap_number, lap.date_start)
+
+    # Count total laps per driver.
+    from collections import defaultdict
+    lap_counts: dict[int, int] = defaultdict(int)
+    for lap in laps:
+        lap_counts[lap.driver_number] += 1
+
+    _far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
+
+    ordered = sorted(
+        driver_last.keys(),
+        key=lambda dn: (
+            -lap_counts[dn],                              # more laps = ahead
+            driver_last[dn][1] or _far_future,           # earlier last-lap start = ahead
+        ),
+    )
+
+    max_laps = max(lap_counts.values())
+    lines: list[str] = []
+    for pos, dn in enumerate(ordered, 1):
+        laps_behind = max_laps - lap_counts[dn]
+        suffix = f"  (+{laps_behind} lap{'s' if laps_behind != 1 else ''})" if laps_behind else ""
+        lines.append(f"    P{pos}. Driver #{dn}{suffix}")
+
+    return lines
+
+
 def _session_block(session: RaceSession, db: Session) -> list[str]:
     """
     Build a short summary block for one synced session.
@@ -119,6 +171,12 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
         lines.append(f"  Laps    : {lap_count} stored across {driver_count} drivers")
     else:
         lines.append("  Laps    : none stored (run sync script to ingest)")
+
+    # Finishing order — derived from lap counts and timing for race/sprint only.
+    finishing = _finishing_order(session.id, session.session_type, db)
+    if finishing:
+        lines.append("  Finishing order (derived from lap data — not official results):")
+        lines.extend(finishing)
 
     # Tyre / stint summary
     stint_line = _stint_summary(session.id, db)
