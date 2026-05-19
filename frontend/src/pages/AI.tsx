@@ -169,8 +169,9 @@ export default function AIAssistant() {
         </p>
         <h1 className="text-3xl font-bold text-white">Ask the Grid</h1>
         <p className="text-gray-400 mt-1">
-          Ask questions about your favourites, standings, and upcoming sessions.
-          The assistant only uses your GridPulse data — it won't invent results.
+          Ask questions about your favourites, standings, upcoming sessions, and
+          synced race data. Answers are based only on data stored in GridPulse —
+          the assistant won't invent results or fetch live information.
         </p>
       </div>
 

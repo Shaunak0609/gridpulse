@@ -1,5 +1,5 @@
 import os
-from collections import Counter
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlalchemy import distinct, func
@@ -26,7 +26,8 @@ _MAX_SESSIONS = 5
 _MAX_REMINDERS = 3
 _MAX_NOTIFICATIONS = 3
 _MAX_SYNCED_SESSIONS = 3   # most-recent synced sessions to describe
-_MAX_RC_MESSAGES = 6       # race control messages per session
+# Race control: no per-session cap — all messages are included.
+# The key-events summary at the top lets the AI quickly locate important ones.
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -42,6 +43,14 @@ def _section(title: str, lines: list[str]) -> str:
 
 
 # ─── Historical session helpers ───────────────────────────────────────────────
+
+def _build_driver_name_map(db: Session) -> dict[int, str]:
+    return {
+        d.driver_number: d.full_name
+        for d in db.query(Driver).all()
+        if d.driver_number is not None
+    }
+
 
 def _weather_summary(session_id: int, db: Session) -> str | None:
     """One-line weather summary, or None if no weather data stored."""
@@ -67,28 +76,105 @@ def _weather_summary(session_id: int, db: Session) -> str | None:
     return ", ".join(parts)
 
 
-def _stint_summary(session_id: int, db: Session) -> str | None:
-    """One-line compound usage summary, or None if no stint data stored."""
+def _per_driver_stints(
+    session_id: int,
+    db: Session,
+    driver_name_map: dict[int, str],
+) -> list[str] | None:
+    """
+    Per-driver stint breakdown — one line per driver showing every stint with
+    compound, lap range, and tyre age.
+
+    Example line:
+      George Russell (#63): S1 MEDIUM laps 1–18 (new), S2 HARD laps 19–40 (new)
+    """
     stints = (
         db.query(Stint)
         .filter(Stint.session_id == session_id)
+        .order_by(Stint.driver_number, Stint.stint_number)
         .all()
     )
     if not stints:
         return None
 
-    compounds = Counter(s.compound for s in stints if s.compound)
-    if not compounds:
-        return f"{len(stints)} stints (compound unknown)"
+    driver_stints: dict[int, list[Stint]] = defaultdict(list)
+    for s in stints:
+        driver_stints[s.driver_number].append(s)
 
-    breakdown = ", ".join(
-        f"{count}×{compound}"
-        for compound, count in compounds.most_common()
-    )
-    return f"{len(stints)} stints — {breakdown}"
+    lines: list[str] = []
+    for dn in sorted(driver_stints):
+        name = driver_name_map.get(dn, f"Driver #{dn}")
+        parts: list[str] = []
+        for s in driver_stints[dn]:
+            compound = s.compound or "?"
+            if s.lap_start is not None and s.lap_end is not None:
+                lap_range = f"laps {s.lap_start}–{s.lap_end}"
+            elif s.lap_start is not None:
+                lap_range = f"from lap {s.lap_start}"
+            else:
+                lap_range = "laps ?"
+            age = (
+                f"{s.tyre_age_at_start} laps old"
+                if s.tyre_age_at_start
+                else "new"
+            )
+            parts.append(f"S{s.stint_number or '?'} {compound} {lap_range} ({age})")
+        lines.append(f"    {name} (#{dn}): {', '.join(parts)}")
+
+    return lines
 
 
-def _finishing_order(session_id: int, session_type: str, db: Session) -> list[str] | None:
+def _key_rc_events(rc_messages: list) -> list[str]:
+    """
+    Scan all race control messages and return a short bullet list of the most
+    significant event types (safety car, red flag, DRS, penalties, investigations).
+    Used as a summary header before the full message list.
+    """
+    keywords = [
+        ("SAFETY CAR DEPLOYED",   "Safety car deployed"),
+        ("SAFETY CAR IN",         "Safety car recalled"),
+        ("VIRTUAL SAFETY CAR",    "Virtual safety car (VSC)"),
+        # OpenF1 encodes VSC as "VSC DEPLOYED" / "VSC ENDING"
+        ("VSC DEPLOYED",          "Virtual safety car (VSC)"),
+        ("RED FLAG",              "Red flag"),
+        # OpenF1 encodes DRS enable/disable as "OVERTAKE ENABLED/DISABLED"
+        ("DRS ENABLED",           "DRS enabled"),
+        ("DRS DISABLED",          "DRS disabled"),
+        ("OVERTAKE ENABLED",      "DRS enabled (overtake)"),
+        ("OVERTAKE DISABLED",     "DRS disabled (overtake)"),
+        ("PIT LANE OPEN",         "Pit lane open"),
+        ("PIT LANE CLOSED",       "Pit lane closed"),
+        ("INVESTIGATE",           "Investigation"),
+        ("PENALTY",               "Penalty"),
+        ("DRIVE THROUGH",         "Drive-through penalty"),
+        ("STOP AND GO",           "Stop-and-go penalty"),
+        ("STOP-AND-GO",           "Stop-and-go penalty"),
+        ("RETIRED",               "Retirement"),
+    ]
+
+    seen_labels: set[str] = set()
+    events: list[str] = []
+
+    for msg in rc_messages:
+        text = (msg.message or "").upper()
+        flag = (msg.flag or "").upper()
+        combined = text + " " + flag
+
+        for keyword, label in keywords:
+            if keyword in combined and label not in seen_labels:
+                lap_info = f" (lap {msg.lap_number})" if msg.lap_number is not None else ""
+                events.append(f"    • {label}{lap_info}")
+                seen_labels.add(label)
+
+    return events
+
+
+def _finishing_order(
+    session_id: int,
+    session_type: str,
+    db: Session,
+    driver_name_map: dict[int, str],
+) -> list[str] | None:
     """
     Derive approximate finishing order from lap data for race and sprint sessions.
 
@@ -111,21 +197,19 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     if not laps:
         return None
 
-    # Build driver number → name map from the drivers table so we show names,
-    # not just numbers. Numbers are kept in brackets for cross-reference.
-    driver_name_map: dict[int, str] = {
-        d.driver_number: d.full_name
-        for d in db.query(Driver).all()
-        if d.driver_number is not None
-    }
-
-    # For each driver track: (max_lap_number, date_start of that lap).
-    # Using max lap_number — not row count — avoids being misled by lap 0 rows.
-    driver_last: dict[int, tuple[int, datetime | None]] = {}
+    # For each driver track: (max_lap_number, date_start of that lap, row_count).
+    driver_last: dict[int, tuple[int, datetime | None, int]] = {}
     for lap in laps:
         dn = lap.driver_number
         if dn not in driver_last or lap.lap_number > driver_last[dn][0]:
-            driver_last[dn] = (lap.lap_number, lap.date_start)
+            count = driver_last[dn][2] + 1 if dn in driver_last else 1
+            driver_last[dn] = (lap.lap_number, lap.date_start, count)
+        else:
+            driver_last[dn] = (
+                driver_last[dn][0],
+                driver_last[dn][1],
+                driver_last[dn][2] + 1,
+            )
 
     _far_future = datetime(9999, 1, 1, tzinfo=timezone.utc)
 
@@ -142,8 +226,12 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
     for pos, dn in enumerate(ordered, 1):
         name = driver_name_map.get(dn, f"Driver #{dn}")
         laps_behind = max_lap_number - driver_last[dn][0]
+        row_count = driver_last[dn][2]
         suffix = f"  (+{laps_behind} lap{'s' if laps_behind != 1 else ''})" if laps_behind else ""
-        lines.append(f"    P{pos}. {name} (#{dn}){suffix}")
+        lines.append(
+            f"    P{pos}. {name} (#{dn})  "
+            f"max_lap={driver_last[dn][0]}  rows={row_count}{suffix}"
+        )
 
     return lines
 
@@ -151,10 +239,12 @@ def _finishing_order(session_id: int, session_type: str, db: Session) -> list[st
 def _session_block(session: RaceSession, db: Session) -> list[str]:
     """
     Build a short summary block for one synced session.
-    Includes lap count, tyre summary, weather, and recent race control messages.
+    Includes per-driver lap counts, per-driver tyre strategies, weather,
+    and ALL race control messages (with a key-events summary header).
     Never dumps raw lap rows — only aggregated counts and short text messages.
     """
     lines: list[str] = []
+    driver_name_map = _build_driver_name_map(db)
 
     race_name = session.race.name if session.race else f"Race {session.race_id}"
     location_parts = [
@@ -182,15 +272,17 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
         lines.append("  Laps    : none stored (run sync script to ingest)")
 
     # Finishing order — derived from lap counts and timing for race/sprint only.
-    finishing = _finishing_order(session.id, session.session_type, db)
+    finishing = _finishing_order(session.id, session.session_type, db, driver_name_map)
     if finishing:
         lines.append("  Finishing order (derived from lap data — not official results):")
+        lines.append("    (columns: max_lap = highest lap number recorded; rows = lap row count)")
         lines.extend(finishing)
 
-    # Tyre / stint summary
-    stint_line = _stint_summary(session.id, db)
-    if stint_line:
-        lines.append(f"  Tyres   : {stint_line}")
+    # Per-driver tyre / stint breakdown
+    stint_lines = _per_driver_stints(session.id, db, driver_name_map)
+    if stint_lines:
+        lines.append("  Tyre strategy per driver:")
+        lines.extend(stint_lines)
     else:
         lines.append("  Tyres   : no stint data stored")
 
@@ -201,7 +293,7 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
     else:
         lines.append("  Weather : no weather data stored")
 
-    # Race control messages — short text, safe to include verbatim
+    # Race control messages — ALL messages included; key events summarised first
     rc_all = (
         db.query(RaceControlMessage)
         .filter(RaceControlMessage.session_id == session.id)
@@ -209,18 +301,44 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
         .all()
     )
     if rc_all:
-        # Show only the last N to stay within token budget
-        shown = rc_all[-_MAX_RC_MESSAGES:]
-        omitted = len(rc_all) - len(shown)
-        header = f"  Race control ({len(rc_all)} messages"
-        header += f", showing last {len(shown)}):" if omitted else "):"
-        lines.append(header)
-        for msg in shown:
+        key_events = _key_rc_events(rc_all)
+        if key_events:
+            lines.append(f"  Key race events ({len(rc_all)} total RC messages):")
+            lines.extend(key_events)
+
+        lines.append(f"  Race control — all {len(rc_all)} messages (chronological):")
+        for msg in rc_all:
             lap_tag = f"[Lap {msg.lap_number}] " if msg.lap_number is not None else ""
             flag_tag = f"[{msg.flag}] " if msg.flag else ""
             lines.append(f"    {lap_tag}{flag_tag}{msg.message}")
     else:
         lines.append("  Race control : no messages stored")
+
+    return lines
+
+
+# ─── Driver reference table ───────────────────────────────────────────────────
+
+def _build_driver_reference(db: Session) -> list[str]:
+    """
+    Compact reference mapping driver numbers to names and teams.
+    Lets the AI decode car numbers that appear in race control messages
+    (e.g. "CAR 63 (RUS)" → George Russell, Mercedes).
+    """
+    drivers = (
+        db.query(Driver)
+        .filter(Driver.driver_number.isnot(None))
+        .order_by(Driver.driver_number)
+        .all()
+    )
+    if not drivers:
+        return ["  (no driver data)"]
+
+    lines: list[str] = []
+    for d in drivers:
+        team_name = d.team.name if d.team else "no team"
+        abbreviation = f" ({d.code})" if d.code else ""
+        lines.append(f"  #{d.driver_number}{abbreviation} {d.full_name} — {team_name}")
 
     return lines
 
@@ -337,6 +455,12 @@ def build_context(user: User, db: Session) -> str:
     ]
     sections.append(_section("Recent Notifications", notif_lines))
 
+    # ── Driver number reference ───────────────────────────────────────────────
+    # Included so the AI can decode car numbers in race control messages
+    # (e.g. "CAR 63 (RUS)" → George Russell, Mercedes).
+    ref_lines = _build_driver_reference(db)
+    sections.append(_section("Driver Number Reference (for decoding RC messages)", ref_lines))
+
     # ── Historical session data ───────────────────────────────────────────────
     # Show summaries for the most recently synced sessions.
     # Individual lap rows are never included — only aggregated counts and
@@ -375,7 +499,7 @@ def build_context(user: User, db: Session) -> str:
         "  - Pit stop durations or exact pit timing",
         "  - Live race timing or telemetry of any kind",
         "  - Car telemetry (speed traces, throttle, brake, GPS position)",
-        "  Note: Tyre compounds, weather, and race control messages are stored",
+        "  Note: Tyre strategies, weather, and race control messages are stored",
         "        only for sessions that have been synced via the OpenF1 sync script.",
     ]))
 
