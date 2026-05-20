@@ -134,7 +134,7 @@ function FinishingOrderSection({ entries }: { entries: DashboardDriverSummary[] 
       title="Finishing Order"
       badge={`${entries.length} drivers`}
       empty={entries.length === 0}
-      emptyMessage="No lap data — finishing order cannot be derived for this session."
+      emptyMessage="No lap data has been synced for this session yet — finishing order cannot be derived."
     >
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -221,7 +221,7 @@ function TyreStrategySection({
       title="Tyre Strategy"
       badge={`${stintSummary.length} drivers`}
       empty={stintSummary.length === 0}
-      emptyMessage="No stint data stored for this session."
+      emptyMessage="No stint data has been synced for this session yet."
     >
       {sortedCompounds.length > 0 && (
         <div className="px-5 py-3 flex items-center gap-3 flex-wrap border-b border-gray-800/50">
@@ -312,7 +312,7 @@ function RaceControlSection({
       title="Race Control"
       badge={`${total} total messages`}
       empty={keyEvents.length === 0 && messages.length === 0}
-      emptyMessage="No race control messages stored for this session."
+      emptyMessage="No race control messages available for this session."
     >
       {keyEvents.length > 0 && (
         <div className="px-5 py-3 border-b border-gray-800/50">
@@ -614,7 +614,7 @@ export default function SessionDashboardPage() {
         title="Lap Summary"
         badge={has_lap_data ? `${lap_stats.total_rows.toLocaleString()} rows` : undefined}
         empty={!has_lap_data}
-        emptyMessage="No lap data stored for this session."
+        emptyMessage="No lap data has been synced for this session yet."
       >
         <LapStatsSection stats={lap_stats} />
       </SectionCard>
@@ -646,9 +646,15 @@ export default function SessionDashboardPage() {
         <SectionCard
           title="Weather"
           empty
-          emptyMessage="No weather data stored for this session."
+          emptyMessage="No weather data has been synced for this session yet."
         />
       )}
+
+      {/* Data source footnote */}
+      <p className="text-xs text-center text-gray-700 pb-2">
+        This dashboard is powered by OpenF1 historical sync data.
+        Sections showing no data have not been synced yet for this session.
+      </p>
 
     </div>
   )

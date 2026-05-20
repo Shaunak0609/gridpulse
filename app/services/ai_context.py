@@ -373,7 +373,7 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
     if lap_count:
         lines.append(f"  Laps    : {lap_count} rows stored across {driver_count} drivers")
     else:
-        lines.append("  Laps    : none stored (run sync script to ingest)")
+        lines.append("  Laps    : GridPulse does not have synced lap data for this session.")
 
     # ── Finishing order (race / sprint only) ──────────────────────────────────
     finishing = _finishing_order(session.id, session.session_type, db, driver_name_map)
@@ -395,7 +395,7 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
     if weather_line:
         lines.append(f"  Weather : {weather_line}")
     else:
-        lines.append("  Weather : no weather data stored")
+        lines.append("  Weather : GridPulse does not have synced weather data for this session.")
 
     # ── Race control messages ─────────────────────────────────────────────────
     rc_all = (
@@ -427,7 +427,7 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
             flag_tag = f"[{msg.flag}] " if msg.flag else ""
             lines.append(f"    {lap_tag}{flag_tag}{msg.message}")
     else:
-        lines.append("  Race control : no messages stored")
+        lines.append("  Race control : GridPulse does not have synced race control data for this session.")
 
     return lines
 
