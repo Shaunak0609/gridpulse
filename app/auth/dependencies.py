@@ -51,3 +51,32 @@ def get_current_user(
         )
 
     return user
+
+
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """
+    Like get_current_user but designed for public endpoints that offer
+    extra personalisation when a valid token is present.
+
+    Returns the User if the token is valid, or None when:
+      - No Authorization header was sent
+      - The token is expired or malformed
+      - The token's user no longer exists in the database
+
+    Never raises — callers must handle the None case gracefully.
+    """
+    if credentials is None:
+        return None
+
+    payload = decode_access_token(credentials.credentials)
+    if payload is None:
+        return None
+
+    email: str | None = payload.get("sub")
+    if not email:
+        return None
+
+    return db.query(User).filter(User.email == email).first()

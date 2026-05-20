@@ -4,18 +4,22 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_optional_user
 from app.database.database import get_db
 from app.models.lap import Lap
 from app.models.race import Race
 from app.models.race_control_message import RaceControlMessage
 from app.models.session import Session as RaceSession
 from app.models.stint import Stint
+from app.models.user import User
 from app.models.weather_sample import WeatherSample
 from app.schemas.lap import LapResponse
 from app.schemas.race_control_message import RaceControlMessageResponse
 from app.schemas.session import SessionDetailResponse, SessionResponse
+from app.schemas.session_dashboard import SessionDashboardResponse
 from app.schemas.stint import StintResponse
 from app.schemas.weather_sample import WeatherSampleResponse
+from app.services.session_dashboard import get_session_summary
 
 router = APIRouter(tags=["sessions"])
 
@@ -61,6 +65,41 @@ def get_sessions_for_race(race_id: int, db: Session = Depends(get_db)):
     return sessions
 
 
+# ─── Synced sessions list ────────────────────────────────────────────────────
+
+@router.get("/sessions/synced", response_model=list[SessionDetailResponse])
+def get_synced_sessions(db: Session = Depends(get_db)):
+    """
+    Return all sessions that have been synced from OpenF1
+    (i.e. openf1_session_key is set), ordered most-recent first.
+
+    Used by the Race Dashboard session picker on the frontend.
+    """
+    sessions = (
+        db.query(RaceSession)
+        .filter(RaceSession.openf1_session_key.isnot(None))
+        .order_by(RaceSession.start_time.desc())
+        .all()
+    )
+    # SessionDetailResponse needs race_name — build the list explicitly
+    result = []
+    for s in sessions:
+        result.append({
+            "id": s.id,
+            "race_id": s.race_id,
+            "session_type": s.session_type,
+            "session_name": s.session_name,
+            "start_time": s.start_time,
+            "end_time": s.end_time,
+            "timezone": s.timezone,
+            "circuit_short_name": s.circuit_short_name,
+            "country_name": s.country_name,
+            "openf1_session_key": s.openf1_session_key,
+            "race_name": s.race.name if s.race else None,
+        })
+    return result
+
+
 # ─── Single session lookup ───────────────────────────────────────────────────
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
@@ -104,6 +143,32 @@ def _get_session_or_404(session_id: int, db: Session) -> RaceSession:
 
 
 # ─── Historical data endpoints ────────────────────────────────────────────────
+
+@router.get("/sessions/{session_id}/dashboard", response_model=SessionDashboardResponse)
+def get_session_dashboard(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """
+    Return a structured dashboard summary for one session.
+
+    Public endpoint — no token required.
+    If a valid Bearer token is provided, the response marks favourite
+    drivers with is_favourite=True in the finishing order and stint summary.
+
+    Returns 404 if the session does not exist.
+    Returns the full schema with has_* flags set to False for every section
+    that has no historical data (session not synced or data not ingested).
+    """
+    summary = get_session_summary(session_id, db, current_user)
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with id {session_id} not found.",
+        )
+    return SessionDashboardResponse.from_summary(summary)
+
 
 @router.get("/sessions/{session_id}/laps", response_model=list[LapResponse])
 def get_laps(session_id: int, db: Session = Depends(get_db)):
