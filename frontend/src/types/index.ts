@@ -241,3 +241,85 @@ export interface WeatherSample {
   wind_speed: number | null
   wind_direction: number | null
 }
+
+// ─── Session Dashboard ───────────────────────────────────────────────────────
+// Mirrors app/schemas/session_dashboard.py — SessionDashboardResponse
+
+export interface DashboardLapStats {
+  total_rows: number
+  driver_count: number
+  max_lap: number | null
+}
+
+export interface DashboardDriverSummary {
+  position: number
+  driver_number: number
+  driver_name: string
+  max_lap: number
+  laps_behind: number
+  is_favourite: boolean
+}
+
+export interface DashboardStintEntry {
+  stint_number: number | null
+  compound: string | null
+  lap_start: number | null
+  lap_end: number | null
+  tyre_age_at_start: number | null
+}
+
+export interface DashboardStintSummary {
+  driver_number: number
+  driver_name: string
+  stints: DashboardStintEntry[]
+  is_favourite: boolean
+}
+
+export interface DashboardKeyEvent {
+  label: string
+  lap_number: number | null
+}
+
+export interface DashboardRCMessage {
+  lap_number: number | null
+  flag: string | null
+  message: string
+}
+
+export interface DashboardRaceControlSummary {
+  key_events: DashboardKeyEvent[]
+  messages: DashboardRCMessage[]
+  total: number
+  blue_flag_count: number
+  omitted_count: number
+}
+
+export interface DashboardWeatherSummary {
+  air_min: number | null
+  air_max: number | null
+  track_min: number | null
+  track_max: number | null
+  had_rain: boolean
+  sample_count: number
+}
+
+export interface SessionDashboard {
+  session_id: number
+  session_name: string
+  session_type: string
+  race_name: string
+  circuit_short_name: string | null
+  country_name: string | null
+  start_time: string | null
+  is_synced: boolean
+  has_lap_data: boolean
+  has_stint_data: boolean
+  has_rc_data: boolean
+  has_weather_data: boolean
+  lap_stats: DashboardLapStats
+  finishing_order: DashboardDriverSummary[]
+  compound_overview: Record<string, number>
+  stint_summary: DashboardStintSummary[]
+  race_control: DashboardRaceControlSummary
+  weather: DashboardWeatherSummary | null
+}
