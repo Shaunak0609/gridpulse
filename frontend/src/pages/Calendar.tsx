@@ -195,8 +195,19 @@ function SessionPanel({
                 </div>
               )}
 
-              {/* Keep layout consistent for past sessions */}
-              {(past || !session.start_time) && <div className="shrink-0 w-28" />}
+              {/* Dashboard link for past sessions; layout placeholder otherwise */}
+              {past ? (
+                <div className="shrink-0 w-28 text-right">
+                  <Link
+                    to={`/sessions/${session.id}/dashboard`}
+                    className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+                  >
+                    Dashboard →
+                  </Link>
+                </div>
+              ) : !session.start_time ? (
+                <div className="shrink-0 w-28" />
+              ) : null}
             </div>
           )
         })}
