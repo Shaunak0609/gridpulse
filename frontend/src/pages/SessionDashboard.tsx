@@ -255,6 +255,7 @@ function TyreStrategySection({
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {driver.stints.map((stint, i) => {
+                const stintLabel = stint.stint_number != null ? `S${stint.stint_number}` : `S${i + 1}`
                 const lapRange =
                   stint.lap_start != null && stint.lap_end != null
                     ? `L${stint.lap_start}–${stint.lap_end}`
@@ -270,6 +271,7 @@ function TyreStrategySection({
                     key={i}
                     className="flex items-center gap-1.5 bg-gray-800/60 rounded px-2 py-1"
                   >
+                    <span className="text-gray-600 text-xs font-mono">{stintLabel}</span>
                     <CompoundBadge compound={stint.compound} />
                     {lapRange && (
                       <span className="text-gray-500 text-xs font-mono">{lapRange}</span>
@@ -355,28 +357,65 @@ function RaceControlSection({
   )
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function windCompass(degrees: number | null): string {
+  if (degrees === null) return ''
+  const labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  return labels[Math.round(degrees / 45) % 8]
+}
+
 // ─── Weather section ──────────────────────────────────────────────────────────
 
 function WeatherSection({ weather }: { weather: NonNullable<SessionDashboard['weather']> }) {
-  const stats = [
+  const latest = weather.latest_sample
+
+  // Latest-reading stat cells — only include fields that have a value
+  const latestStats: { label: string; value: string; highlight?: boolean }[] = []
+  if (latest) {
+    if (latest.air_temperature != null)
+      latestStats.push({ label: 'Air temp', value: `${latest.air_temperature} °C` })
+    if (latest.track_temperature != null)
+      latestStats.push({ label: 'Track temp', value: `${latest.track_temperature} °C` })
+    if (latest.humidity != null)
+      latestStats.push({ label: 'Humidity', value: `${latest.humidity}%` })
+    latestStats.push({
+      label: 'Rainfall',
+      value: latest.rainfall ? 'Yes' : 'No',
+      highlight: latest.rainfall ?? false,
+    })
+    if (latest.wind_speed != null) {
+      const dir = latest.wind_direction != null
+        ? ` ${windCompass(latest.wind_direction)}`
+        : ''
+      latestStats.push({ label: 'Wind', value: `${latest.wind_speed} m/s${dir}` })
+    }
+  }
+
+  // Session-range cells
+  const rangeStats = [
     {
-      label: 'Air temp',
+      label: 'Air temp range',
       value:
         weather.air_min != null && weather.air_max != null
           ? `${weather.air_min}–${weather.air_max} °C`
           : '—',
-      highlight: false,
     },
     {
-      label: 'Track temp',
+      label: 'Track temp range',
       value:
         weather.track_min != null && weather.track_max != null
           ? `${weather.track_min}–${weather.track_max} °C`
           : '—',
-      highlight: false,
     },
-    { label: 'Rainfall', value: weather.had_rain ? 'Yes' : 'No', highlight: weather.had_rain },
-    { label: 'Samples', value: weather.sample_count.toLocaleString(), highlight: false },
+    {
+      label: 'Rain during session',
+      value: weather.had_rain ? 'Yes' : 'No',
+    },
+    {
+      label: 'Samples stored',
+      value: weather.sample_count.toLocaleString(),
+    },
   ]
 
   return (
@@ -385,17 +424,39 @@ function WeatherSection({ weather }: { weather: NonNullable<SessionDashboard['we
         <h2 className="text-sm font-semibold text-white">Weather</h2>
         <span className="text-xs font-mono text-gray-500">{weather.sample_count} readings</span>
       </div>
+
+      {/* Latest reading */}
+      {latestStats.length > 0 && (
+        <>
+          <div className="px-5 py-2 border-b border-gray-800/50">
+            <p className="text-xs text-gray-600 uppercase tracking-wider">Latest reading</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-gray-800/50 border-b border-gray-800">
+            {latestStats.map(s => (
+              <div key={s.label} className="bg-gray-900 px-4 py-3">
+                <p className="text-gray-600 text-xs mb-0.5">{s.label}</p>
+                <p
+                  className={`text-sm font-mono font-medium ${
+                    s.highlight ? 'text-blue-400' : 'text-gray-200'
+                  }`}
+                >
+                  {s.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Session range */}
+      <div className="px-5 py-2 border-b border-gray-800/50">
+        <p className="text-xs text-gray-600 uppercase tracking-wider">Session range</p>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-gray-800/50">
-        {stats.map(s => (
+        {rangeStats.map(s => (
           <div key={s.label} className="bg-gray-900 px-4 py-3">
             <p className="text-gray-600 text-xs mb-0.5">{s.label}</p>
-            <p
-              className={`text-sm font-mono font-medium ${
-                s.highlight ? 'text-blue-400' : 'text-gray-200'
-              }`}
-            >
-              {s.value}
-            </p>
+            <p className="text-sm font-mono font-medium text-gray-200">{s.value}</p>
           </div>
         ))}
       </div>

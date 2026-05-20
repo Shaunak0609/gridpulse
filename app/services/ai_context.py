@@ -57,7 +57,12 @@ def _build_driver_name_map(db: Session) -> dict[int, str]:
 
 
 def _weather_summary(session_id: int, db: Session) -> str | None:
-    """One-line weather summary (min/max air + track temp, rainfall)."""
+    """
+    Two-part weather summary: session range + latest reading.
+
+    Format: "Air 18.0–22.5 °C, Track 35.0–45.0 °C, Rain: no (45 readings);
+             Latest: Air 20.1 °C, Track 42.3 °C, Humidity 65%, Wind 3.2 m/s NE"
+    """
     samples = (
         db.query(WeatherSample)
         .filter(WeatherSample.session_id == session_id)
@@ -70,14 +75,37 @@ def _weather_summary(session_id: int, db: Session) -> str | None:
     track = [s.track_temperature for s in samples if s.track_temperature is not None]
     had_rain = any(s.rainfall for s in samples)
 
-    parts: list[str] = []
+    # Session range
+    range_parts: list[str] = []
     if air:
-        parts.append(f"Air {min(air):.1f}–{max(air):.1f} °C")
+        range_parts.append(f"Air {min(air):.1f}–{max(air):.1f} °C")
     if track:
-        parts.append(f"Track {min(track):.1f}–{max(track):.1f} °C")
-    parts.append("Rain: yes" if had_rain else "Rain: no")
-    parts.append(f"({len(samples)} readings)")
-    return ", ".join(parts)
+        range_parts.append(f"Track {min(track):.1f}–{max(track):.1f} °C")
+    range_parts.append("Rain: yes" if had_rain else "Rain: no")
+    range_parts.append(f"({len(samples)} readings)")
+
+    # Latest reading — most recent by timestamp, fallback to last by list order
+    dated = [s for s in samples if s.date is not None]
+    latest = max(dated, key=lambda s: s.date) if dated else samples[-1]
+
+    latest_parts: list[str] = []
+    if latest.air_temperature is not None:
+        latest_parts.append(f"Air {latest.air_temperature:.1f} °C")
+    if latest.track_temperature is not None:
+        latest_parts.append(f"Track {latest.track_temperature:.1f} °C")
+    if latest.humidity is not None:
+        latest_parts.append(f"Humidity {latest.humidity:.0f}%")
+    if latest.wind_speed is not None:
+        compass = ""
+        if latest.wind_direction is not None:
+            labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+            compass = " " + labels[round(latest.wind_direction / 45) % 8]
+        latest_parts.append(f"Wind {latest.wind_speed:.1f} m/s{compass}")
+
+    result = ", ".join(range_parts)
+    if latest_parts:
+        result += "; Latest: " + ", ".join(latest_parts)
+    return result
 
 
 def _per_driver_stints(
@@ -360,7 +388,7 @@ def _session_block(session: RaceSession, db: Session) -> list[str]:
         lines.append("  Tyre strategy:")
         lines.extend(stint_lines)
     else:
-        lines.append("  Tyres   : no stint data stored")
+        lines.append("  Tyres   : GridPulse does not have synced stint/tire data for this session.")
 
     # ── Weather summary ───────────────────────────────────────────────────────
     weather_line = _weather_summary(session.id, db)

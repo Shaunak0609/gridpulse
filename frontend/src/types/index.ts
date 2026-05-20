@@ -294,6 +294,15 @@ export interface DashboardRaceControlSummary {
   omitted_count: number
 }
 
+export interface DashboardLatestWeatherSample {
+  air_temperature: number | null
+  track_temperature: number | null
+  humidity: number | null       // percentage 0–100, rounded to whole number
+  rainfall: boolean | null
+  wind_speed: number | null     // metres per second
+  wind_direction: number | null // degrees: 0 = N, 90 = E, 180 = S, 270 = W
+}
+
 export interface DashboardWeatherSummary {
   air_min: number | null
   air_max: number | null
@@ -301,6 +310,7 @@ export interface DashboardWeatherSummary {
   track_max: number | null
   had_rain: boolean
   sample_count: number
+  latest_sample: DashboardLatestWeatherSample | null
 }
 
 export interface SessionDashboard {

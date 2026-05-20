@@ -134,14 +134,26 @@ class RCMessageSummary:
 
 
 @dataclass
+class LatestWeatherSample:
+    """Raw values from the most recent weather reading in the session."""
+    air_temperature: float | None
+    track_temperature: float | None
+    humidity: float | None       # percentage, 0–100
+    rainfall: bool | None
+    wind_speed: float | None     # metres per second
+    wind_direction: int | None   # degrees: 0 = N, 90 = E, 180 = S, 270 = W
+
+
+@dataclass
 class WeatherSummary:
-    """Temperature range and rainfall from weather samples."""
+    """Temperature range, rainfall flag, and latest reading from weather samples."""
     air_min: float | None
     air_max: float | None
     track_min: float | None
     track_max: float | None
     had_rain: bool
     sample_count: int
+    latest_sample: LatestWeatherSample | None = None
 
 
 @dataclass
@@ -401,7 +413,7 @@ def _curate_rc_messages(
 
 
 def _build_weather_summary(session_id: int, db: DBSession) -> WeatherSummary | None:
-    """Aggregate weather samples into a single summary. Returns None if no data."""
+    """Aggregate weather samples into a summary with range stats and latest reading."""
     samples = (
         db.query(WeatherSample)
         .filter(WeatherSample.session_id == session_id)
@@ -413,6 +425,23 @@ def _build_weather_summary(session_id: int, db: DBSession) -> WeatherSummary | N
     air = [s.air_temperature for s in samples if s.air_temperature is not None]
     track = [s.track_temperature for s in samples if s.track_temperature is not None]
 
+    # Latest reading: prefer the sample with the highest timestamp; fall back to
+    # the last element when all dates are null (shouldn't happen in practice).
+    dated = [s for s in samples if s.date is not None]
+    latest_raw = max(dated, key=lambda s: s.date) if dated else samples[-1]
+
+    def _r1(v: float | None) -> float | None:
+        return round(v, 1) if v is not None else None
+
+    latest = LatestWeatherSample(
+        air_temperature=_r1(latest_raw.air_temperature),
+        track_temperature=_r1(latest_raw.track_temperature),
+        humidity=round(latest_raw.humidity) if latest_raw.humidity is not None else None,
+        rainfall=latest_raw.rainfall,
+        wind_speed=_r1(latest_raw.wind_speed),
+        wind_direction=latest_raw.wind_direction,
+    )
+
     return WeatherSummary(
         air_min=round(min(air), 1) if air else None,
         air_max=round(max(air), 1) if air else None,
@@ -420,6 +449,7 @@ def _build_weather_summary(session_id: int, db: DBSession) -> WeatherSummary | N
         track_max=round(max(track), 1) if track else None,
         had_rain=any(s.rainfall for s in samples),
         sample_count=len(samples),
+        latest_sample=latest,
     )
 
 

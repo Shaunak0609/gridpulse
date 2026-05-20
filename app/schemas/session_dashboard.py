@@ -88,14 +88,25 @@ class DashboardRaceControlSummary(BaseModel):
     omitted_count: int      # non-blue messages omitted due to cap
 
 
+class DashboardLatestWeatherSample(BaseModel):
+    """Raw values from the most recent single weather reading."""
+    air_temperature: float | None
+    track_temperature: float | None
+    humidity: float | None       # percentage, 0–100; rounded to whole number
+    rainfall: bool | None
+    wind_speed: float | None     # metres per second
+    wind_direction: int | None   # degrees: 0 = N, 90 = E, 180 = S, 270 = W
+
+
 class DashboardWeatherSummary(BaseModel):
-    """Min / max temperature and rainfall flag across all weather samples."""
+    """Session weather: range stats across all samples plus the latest reading."""
     air_min: float | None
     air_max: float | None
     track_min: float | None
     track_max: float | None
     had_rain: bool
     sample_count: int
+    latest_sample: DashboardLatestWeatherSample | None
 
 
 # ─── Top-level response ───────────────────────────────────────────────────────
@@ -226,6 +237,18 @@ class SessionDashboardResponse(BaseModel):
                     track_max=summary.weather.track_max,
                     had_rain=summary.weather.had_rain,
                     sample_count=summary.weather.sample_count,
+                    latest_sample=(
+                        DashboardLatestWeatherSample(
+                            air_temperature=summary.weather.latest_sample.air_temperature,
+                            track_temperature=summary.weather.latest_sample.track_temperature,
+                            humidity=summary.weather.latest_sample.humidity,
+                            rainfall=summary.weather.latest_sample.rainfall,
+                            wind_speed=summary.weather.latest_sample.wind_speed,
+                            wind_direction=summary.weather.latest_sample.wind_direction,
+                        )
+                        if summary.weather.latest_sample is not None
+                        else None
+                    ),
                 )
                 if summary.weather is not None
                 else None
