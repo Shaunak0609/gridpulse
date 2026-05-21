@@ -23,7 +23,13 @@ _MAX_STANDINGS = 10
 _MAX_SESSIONS = 5
 _MAX_REMINDERS = 3
 _MAX_NOTIFICATIONS = 3
-_MAX_SYNCED_SESSIONS = 3    # most-recent synced sessions to describe
+_MAX_SYNCED_SESSIONS = 2    # most-recent synced sessions to describe
+
+# AI-specific caps — tighter than the service-level caps to protect the
+# Groq free-tier 6 000 TPM limit. The session dashboard endpoint uses
+# higher caps because it doesn't need to fit inside a single prompt.
+_AI_MAX_RC = 15             # RC messages per session (service cap is 40)
+_AI_MAX_DRIVER_LAPS = 10    # per-driver lap rows for qualifying/FP sessions
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -92,8 +98,11 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
                 .all()
             )
             if driver_max:
-                lines.append("  Per-driver laps (max lap number recorded):")
-                for dn, max_lap_n in driver_max:
+                shown = driver_max[:_AI_MAX_DRIVER_LAPS]
+                extra = len(driver_max) - len(shown)
+                suffix = f" ({extra} more not shown)" if extra else ""
+                lines.append(f"  Per-driver laps (max lap number recorded){suffix}:")
+                for dn, max_lap_n in shown:
                     lines.append(f"    #{dn}: {max_lap_n}")
     else:
         lines.append("  Laps    : GridPulse does not have synced lap data for this session.")
@@ -183,18 +192,15 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
                 lap_info = f" (lap {ev.lap_number})" if ev.lap_number is not None else ""
                 lines.append(f"    • {ev.label}{lap_info}")
 
-        note_parts: list[str] = []
-        if summary.rc_blue_flag_count:
-            note_parts.append(f"{summary.rc_blue_flag_count} blue-flag messages excluded")
-        if summary.rc_omitted_count > 0:
-            note_parts.append(f"{summary.rc_omitted_count} routine messages omitted")
-        note = f" ({'; '.join(note_parts)})" if note_parts else ""
+        ai_rc = summary.rc_messages[:_AI_MAX_RC]
+        not_shown = summary.rc_total - len(ai_rc)
+        note = f" ({not_shown} not shown — blue-flag + routine excluded)" if not_shown else ""
 
         lines.append(
-            f"  Race control — {len(summary.rc_messages)} of "
+            f"  Race control — {len(ai_rc)} of "
             f"{summary.rc_total} messages shown{note}:"
         )
-        for msg in summary.rc_messages:
+        for msg in ai_rc:
             lap_tag = f"[Lap {msg.lap_number}] " if msg.lap_number is not None else ""
             flag_tag = f"[{msg.flag}] " if msg.flag else ""
             lines.append(f"    {lap_tag}{flag_tag}{msg.message}")
