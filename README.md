@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 11
+## Current Status — Phase 12
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -292,6 +292,112 @@ FastF1 is a Python library providing car telemetry (speed, throttle, brake, RPM,
 - Automatic session sync — the sync script must be run manually
 - Constructor standings data
 
+### Phase 12 — Historical Race Dashboard (complete)
+
+Phase 12 adds a structured per-session dashboard built entirely from stored OpenF1 historical data. It surfaces lap counts, a derived finishing order, tyre strategy, race control events, and weather in a single page. Favourite drivers are highlighted for logged-in users. The AI context builder was refactored to use the same data layer and given explicit missing-data awareness.
+
+**What Phase 12 added:**
+
+- `app/services/session_dashboard.py` — single source of truth for building a `SessionDashboardSummary` from the database. All heavy work (lap aggregation, finishing order derivation, stint grouping, RC message curation, weather latest-sample selection) lives here. Used by both the API endpoint and the AI context builder — no duplicate queries.
+
+- `app/schemas/session_dashboard.py` — Pydantic response models that mirror the service dataclasses:
+
+  | Schema | Description |
+  |---|---|
+  | `DashboardLapStats` | Total lap rows, driver count, max lap number |
+  | `DashboardDriverSummary` | Position, driver number/name, max lap, laps behind, is_favourite flag |
+  | `DashboardStintEntry` | Stint number, compound, lap range, tyre age at start |
+  | `DashboardStintSummary` | All stints for one driver, is_favourite flag |
+  | `DashboardKeyEvent` | Label and lap number for notable RC events (safety car, red flag, DRS…) |
+  | `DashboardRCMessage` | Lap number, flag, and message text for one curated RC entry |
+  | `DashboardRaceControlSummary` | Key events list, curated message list, counts |
+  | `DashboardLatestWeatherSample` | Air/track temp, humidity, rainfall, wind speed/direction |
+  | `DashboardWeatherSummary` | Session range stats plus the latest reading |
+  | `SessionDashboardResponse` | Top-level response; exposes all sections plus has_* availability flags |
+
+- `GET /sessions/{session_id}/dashboard` — new public endpoint (optional JWT). Returns a `SessionDashboardResponse` for the session. Returns `404` if the session does not exist. Accepts an optional Bearer token; if provided and valid, `is_favourite` flags on driver rows reflect the authenticated user's favourites. If no token is provided, `is_favourite` is always `false`.
+
+- `get_optional_user` dependency (`app/auth/dependencies.py`) — returns `User | None`, never raises. Used by the dashboard endpoint so anonymous callers receive a valid response without authentication errors.
+
+- `GET /sessions/synced` — returns all sessions that have been linked to an OpenF1 session key, ordered by start time descending. Used by the frontend to populate the session picker.
+
+- Frontend `getSessionDashboard(sessionId, token?)` in `api.ts` — fetches the dashboard endpoint. Passes the JWT as a Bearer token if the user is logged in, so `is_favourite` flags are populated.
+
+- Frontend `/sessions/:id/dashboard` page (`SessionDashboard.tsx`):
+  - Public route — accessible without login; personal favourite highlighting appears for logged-in users only
+  - Waits for `authLoading` to resolve before fetching, preventing an anonymous request followed immediately by an authenticated one
+  - Declared before `/sessions/:id` in `App.tsx` to avoid route conflict
+
+- **Dashboard sections:**
+
+  | Section | Contents | Shown when |
+  |---|---|---|
+  | Session summary | Race name, circuit, country, date, sync status | Always |
+  | Lap summary | Total lap rows, distinct driver count, max lap number | `has_lap_data = true` |
+  | Finishing order | Derived leaderboard sorted by max lap then final-lap timing | Race and sprint sessions with lap data |
+  | Tyre strategy | Compound overview + per-driver stint pills (S1 / S2 / S3) | `has_stint_data = true` |
+  | Race control | Key events (safety car, red flag, VSC, DRS, penalties) + curated message list | `has_rc_data = true` |
+  | Weather | Latest reading (air temp, track temp, humidity, wind) + session range | `has_weather_data = true` |
+
+- **Empty states:** each section shows a specific message when its `has_*` flag is false — e.g. "No lap data has been synced for this session yet." A page-level footnote explains the OpenF1 sync dependency.
+
+- **Favourite driver highlighting:** drivers marked `is_favourite = true` receive a red star (★) in the finishing order and tyre strategy tables, and a subtle red row tint. Logged-out users see no highlighting.
+
+- **Calendar navigation:** past session rows on the Calendar page show a "Dashboard →" link that opens `/sessions/:id/dashboard`.
+
+**AI context improvements:**
+
+- `ai_context.py` refactored — `_session_block()` now calls `build_session_summary()` instead of running duplicate DB queries. The six private helper functions that existed only to replicate session_dashboard logic were removed.
+
+- **Missing-data flags** — every session block now includes a `Missing: no_lap_data, no_stint_data, no_race_control_data, no_weather_data` line for any section that has not been synced. The AI reads these before answering and states what is absent rather than guessing.
+
+- **Per-driver lap table** — for qualifying and FP sessions (where there is no finishing order), the context includes a compact table of max lap numbers per driver so the AI can answer "how many laps did [driver] complete in qualifying?".
+
+- **Latest weather reading** — the AI context now includes the most recent weather sample (air temperature, track temperature, humidity, wind speed and direction) alongside the existing session-range stats.
+
+- **Token budget safeguards** — three AI-specific caps protect the Groq free-tier 6 000 TPM limit:
+  - `_MAX_SYNCED_SESSIONS = 2` (session blocks included in context)
+  - `_AI_MAX_RC = 15` (RC messages per session; service-level cap is 40)
+  - `_AI_MAX_DRIVER_LAPS = 10` (per-driver rows in qualifying/FP lap table)
+  - System prompt trimmed to ~621 tokens; total worst-case request is ~3 800 tokens
+
+**What the AI can answer from dashboard data:**
+- Approximate finishing order for synced race and sprint sessions ("based on synced lap data")
+- Tyre compounds, lap ranges, and whether tyres were new or used for any driver in a synced session
+- Key race events (safety car deployments, red flags, DRS openings, penalties) with lap numbers
+- Curated race control messages for specific laps or incident queries
+- Session weather: temperature range, rainfall, humidity, wind direction
+- How many laps a driver completed (race/sprint from finishing order; qualifying/FP from per-driver lap table)
+
+**What the AI still cannot answer if data is missing:**
+- Anything flagged `no_lap_data`, `no_stint_data`, `no_race_control_data`, or `no_weather_data` — the AI states exactly which data is absent and does not guess
+- Official race classifications — the finishing order is derived from lap timing; post-race penalties and disqualifications are not reflected
+- Qualifying results, grid positions, or pole lap times — no `qualifying_results` table exists
+- Individual lap times per driver or fastest lap records
+- Pit stop durations or exact pit window timing
+
+**How to sync data before using the dashboard:**
+
+1. Find the OpenF1 session key for the session you want:
+   ```bash
+   python scripts/sync_openf1_session.py --list 2024
+   ```
+2. Sync it:
+   ```bash
+   python scripts/sync_openf1_session.py --session-key 9158
+   ```
+3. Open the Calendar page, expand the race, and click **Dashboard →** on the session row.
+
+**What is not included in Phase 12:**
+- Live timing of any kind — all data is from stored OpenF1 historical snapshots
+- WebSockets, Redis, or any real-time transport
+- Track map or moving driver position dots
+- Lap time charts or visualisations
+- ML predictions or strategy recommendations
+- Official race classifications — the finishing order is derived, not authoritative
+- Pit stop duration data
+- Qualifying or practice result tables
+
 ---
 
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
@@ -420,7 +526,8 @@ gridpulse/
 │   │   ├── lap.py                # LapResponse (Phase 11)
 │   │   ├── stint.py              # StintResponse (Phase 11)
 │   │   ├── race_control_message.py  # RaceControlMessageResponse (Phase 11)
-│   │   └── weather_sample.py     # WeatherSampleResponse (Phase 11)
+│   │   ├── weather_sample.py     # WeatherSampleResponse (Phase 11)
+│   │   └── session_dashboard.py  # SessionDashboardResponse and all nested schemas (Phase 12)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -432,7 +539,7 @@ gridpulse/
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
 │   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoint (Phase 6/9.5)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
-│   │   ├── sessions.py           # GET /sessions/upcoming, GET /races/{id}/sessions, GET /sessions/{id}, historical data endpoints (Phase 7.5/11)
+│   │   ├── sessions.py           # GET /sessions/upcoming, /synced, /races/{id}/sessions, /sessions/{id}, historical data + dashboard endpoints (Phase 7.5/11/12)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
 │   │   ├── dashboard.py          # GET /me/dashboard (Phase 8)
 │   │   └── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
@@ -443,9 +550,10 @@ gridpulse/
 │   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
 │   │   ├── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
 │   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic (Phase 10)
-│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; includes historical session summaries (Phase 10/11)
+│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; uses session_dashboard service (Phase 10/11/12)
 │   │   ├── openf1_client.py      # HTTP client for OpenF1 API — fetch_laps, fetch_stints, fetch_race_control, fetch_weather, etc. (Phase 11)
-│   │   └── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
+│   │   ├── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
+│   │   └── session_dashboard.py  # build_session_summary() — single source of truth for dashboard data (Phase 12)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -762,6 +870,8 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/sessions/{session_id}/stints` | All stored stints for a session, ordered by driver number then lap start |
 | GET | `/sessions/{session_id}/race-control` | All stored race control messages for a session, ordered by timestamp |
 | GET | `/sessions/{session_id}/weather` | All stored weather samples for a session, ordered by timestamp |
+| GET | `/sessions/{session_id}/dashboard` | Structured dashboard summary — lap stats, derived finishing order, tyre strategy, race control, weather; optional Bearer token for favourite-driver highlighting |
+| GET | `/sessions/synced` | All sessions linked to an OpenF1 session key, ordered by start time descending |
 
 ### Authentication endpoints
 
@@ -1636,6 +1746,89 @@ curl -i http://localhost:8000/sessions/99999/laps
 
 ---
 
+## Testing the Historical Race Dashboard
+
+### Prerequisites
+
+The dashboard page only shows data for sessions that have been synced via `sync_openf1_session.py`. Sync at least one race session before testing the dashboard (see the **OpenF1 Session Sync** section above for the `--list` and `--session-key` steps).
+
+### Test the backend endpoint
+
+```bash
+uvicorn app.main:app --reload
+```
+
+```bash
+# Replace 5 with the session_id of a synced session
+curl http://localhost:8000/sessions/5/dashboard | python3 -m json.tool
+```
+
+Expected: a JSON object with `session_id`, `session_name`, `is_synced: true`, and populated `lap_stats`, `finishing_order`, `stint_summary`, `race_control`, and `weather` sections.
+
+For an unsynced session, the `has_*` flags will be `false` and the data sections will be empty:
+```bash
+curl http://localhost:8000/sessions/1/dashboard | python3 -m json.tool
+# Expect: is_synced: false, has_lap_data: false, etc.
+```
+
+### Test favourite-driver highlighting
+
+With a logged-in user who has favourited at least one driver:
+
+```bash
+# Get a JWT token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"yourpass"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl http://localhost:8000/sessions/5/dashboard \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | grep is_favourite
+```
+
+Expected: `"is_favourite": true` for any driver the user has favourited.
+
+### Test the frontend dashboard page
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Go to `http://localhost:5173/calendar`
+3. Expand a past race — each session row shows a **Dashboard →** link
+4. Click it — you are taken to `/sessions/:id/dashboard`
+5. If the session has not been synced: every section shows its specific empty-state message (e.g. "No lap data has been synced for this session yet.") and the page-level footnote about OpenF1 sync dependency is visible
+6. If the session has been synced: all sections fill in with real data
+
+### Verify each dashboard section
+
+| Section | What to check |
+|---|---|
+| Session summary | Race name, circuit, country, date match the session |
+| Lap summary | Driver count and max lap number match psql query on `laps` table |
+| Finishing order | P1 driver has the highest max_lap; lapped drivers show "+N lap(s)" |
+| Tyre strategy | Compound pills match the `stints` table; used tyres show age at start |
+| Race control | Key events match the `race_control_messages` table; safety car lap number is accurate |
+| Weather | Air/track temps and latest reading match the `weather_samples` table |
+
+### Test favourite-driver highlighting in the frontend
+
+1. Log in and favourite at least one driver on the Drivers page
+2. Navigate to the dashboard for a synced race session
+3. The favourited driver should have a red star (★) in the finishing order and tyre strategy tables, and a subtle red row background
+
+### Test AI questions about dashboard data
+
+After syncing a session, go to `http://localhost:5173/ai` and try:
+
+| Prompt | Expected behaviour |
+|---|---|
+| `Who won the race?` | Gives P1 from derived finishing order with an approximation caveat |
+| `What tyres did [driver] use?` | Lists all stints from the context with compound and lap range |
+| `Was there a safety car?` | Answers from the key race events bullet in context |
+| `What was the weather like?` | Gives session range and latest reading |
+| `What was [driver]'s fastest lap?` | Says GridPulse does not store individual lap times |
+| `What happened in qualifying?` | Says GridPulse does not store qualifying results |
+
+---
+
 ## FastF1 — Future Integration Plan
 
 FastF1 is a Python library (not used in Phase 11) that provides data OpenF1 does not:
@@ -1670,12 +1863,13 @@ The following features are planned but not yet built:
 - Multi-turn conversation threading — each question is currently independent (single-turn Q&A)
 - Streaming responses (WebSocket or Server-Sent Events)
 
-**Historical data (partial — Phase 11 complete, gaps remaining):**
-- Individual race results and finishing positions — no `race_results` table yet
+**Historical data (partial — Phase 12 complete, gaps remaining):**
+- Official race classifications — the dashboard finishing order is derived from lap timing; post-race penalties and DSQs are not reflected
 - Qualifying results and grid positions — no `qualifying_results` table yet
-- Lap time charts and analytics — data is stored but visualisations are Phase 12+
+- Individual lap time charts and analytics — data is stored but visualisations are Phase 13+
 - Automatic session sync — the sync script must still be run manually
 - FastF1 telemetry (speed traces, throttle, GPS position) — planned for analytics phase
+- Pit stop duration data
 
 **Notifications:**
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
@@ -1734,8 +1928,8 @@ Protected `/ai` page for signed-in users. Ask questions about standings, favouri
 **Phase 11 — OpenF1 / FastF1 Historical Data Upgrade** *(complete)*
 OpenF1 API client, ingestion service, and sync script. Four new tables: laps, stints, race control messages, weather samples. Five new REST endpoints. Session detail frontend page at `/sessions/:id`. AI context updated to include historical session summaries.
 
-**Phase 12 — Live/Historical Race Dashboard**
-A second-screen race dashboard using stored historical data. Leaderboard-style lap and position data, race control messages, stint and tyre context, weather conditions, and favourite-driver highlighting.
+**Phase 12 — Historical Race Dashboard** *(complete)*
+Structured per-session dashboard at `GET /sessions/{id}/dashboard` and `/sessions/:id/dashboard`. Sections: derived finishing order, tyre strategy per driver, key race control events, weather with latest reading, favourite-driver highlighting. AI context refactored to use the dashboard service as a single source of truth; missing-data flags, per-driver lap table, and token budget safeguards added.
 
 **Phase 13 — Strategy Dashboard**
 Tyre strategy timeline, stint history per driver, pit window context, tyre degradation trends, and pit stop comparison.
