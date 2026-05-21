@@ -564,10 +564,16 @@ export default function SessionDashboardPage() {
           ← Calendar
         </Link>
         <Link
-          to={`/sessions/${sessionId}`}
-          className="text-gray-600 hover:text-gray-400 transition-colors ml-auto"
+          to={`/sessions/${sessionId}/strategy`}
+          className="text-gray-600 hover:text-orange-400 transition-colors ml-auto"
         >
-          Raw session data →
+          Strategy →
+        </Link>
+        <Link
+          to={`/sessions/${sessionId}`}
+          className="text-gray-600 hover:text-gray-400 transition-colors"
+        >
+          Raw data →
         </Link>
       </div>
 

@@ -14,6 +14,7 @@ from app.models.session import Session as RaceSession
 from app.models.standing import DriverStanding
 from app.models.user import User
 from app.services.session_dashboard import build_session_summary
+from app.services.strategy_dashboard import build_strategy_summary
 
 SEASON = int(os.getenv("F1_SEASON", "2026"))
 
@@ -30,6 +31,8 @@ _MAX_SYNCED_SESSIONS = 2    # most-recent synced sessions to describe
 # higher caps because it doesn't need to fit inside a single prompt.
 _AI_MAX_RC = 15             # RC messages per session (service cap is 40)
 _AI_MAX_DRIVER_LAPS = 10    # per-driver lap rows for qualifying/FP sessions
+_AI_MAX_STRATEGY_DRIVERS = 20  # per-driver strategy rows in AI context
+_AI_MAX_INSIGHTS = 4            # rule-based insight sentences to include
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -50,6 +53,70 @@ def _wind_compass(degrees: int | None) -> str:
         return ""
     labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     return " " + labels[round(degrees / 45) % 8]
+
+
+def _ai_strategy_lines(session: RaceSession, db: Session, user: User) -> list[str]:
+    """
+    Compact strategy context for one synced session.
+    Covers compound usage, stop counts, pit windows, per-driver sequences,
+    and top insights. RC events and weather are emitted separately in
+    _session_block() to avoid doubling the token budget.
+    """
+    summary = build_strategy_summary(session, db, user)
+
+    if not summary.has_stint_data:
+        return ["  Tyres   : GridPulse does not have synced stint/tyre data for this session."]
+
+    lines: list[str] = ["  Strategy:"]
+
+    # Compound usage overview
+    if summary.compound_usage:
+        parts: list[str] = []
+        for cu in summary.compound_usage:
+            part = f"{cu.compound}×{cu.stint_count}"
+            if cu.avg_stint_laps is not None:
+                part += f" avg {cu.avg_stint_laps}L"
+            parts.append(part)
+        lines.append("    Compounds  : " + ", ".join(parts))
+
+    # Stop-count summary (counts only — driver-level detail is in per-driver sequences)
+    if summary.stop_count_groups:
+        stop_parts: list[str] = []
+        for stops in sorted(summary.stop_count_groups):
+            n = len(summary.stop_count_groups[stops])
+            label = "stop" if stops == 1 else "stops"
+            stop_parts.append(f"{stops} {label}: {n} driver{'s' if n != 1 else ''}")
+        lines.append("    Pit stops  : " + "; ".join(stop_parts))
+
+    # Pit windows
+    if summary.pit_windows:
+        pw_parts: list[str] = []
+        for pw in summary.pit_windows:
+            if pw.lap_min == pw.lap_max:
+                pw_parts.append(f"Lap {pw.lap_min} ({pw.driver_count} drivers)")
+            else:
+                pw_parts.append(f"Laps {pw.lap_min}–{pw.lap_max} ({pw.driver_count} drivers)")
+        lines.append("    Pit windows: " + "; ".join(pw_parts))
+
+    # Per-driver compound sequences (compact, capped)
+    shown = summary.driver_strategies[:_AI_MAX_STRATEGY_DRIVERS]
+    extra = len(summary.driver_strategies) - len(shown)
+    suffix = f" ({extra} more not shown)" if extra else ""
+    if shown:
+        lines.append(f"    Per-driver sequences{suffix}:")
+        for ds in shown:
+            seq = " → ".join(ds.compound_sequence) if ds.compound_sequence else "unknown"
+            stop_str = f"{ds.stop_count} stop{'s' if ds.stop_count != 1 else ''}"
+            long_str = f", longest {ds.longest_stint_laps}L" if ds.longest_stint_laps else ""
+            lines.append(
+                f"      {ds.driver_name} (#{ds.driver_number}): {seq} [{stop_str}{long_str}]"
+            )
+
+    # Top rule-based insights
+    for insight in summary.insights[:_AI_MAX_INSIGHTS]:
+        lines.append(f"    • {insight}")
+
+    return lines
 
 
 def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
@@ -121,34 +188,8 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
                 f"max_lap={e.max_lap}  rows={e.row_count}{suffix}"
             )
 
-    # ── Tyre strategy ─────────────────────────────────────────────────────────
-    if summary.has_stint_data:
-        lines.append("  Tyre strategy:")
-        if summary.compound_overview:
-            total_stints = sum(summary.compound_overview.values())
-            overview = ", ".join(
-                f"{n}× {c}"
-                for c, n in sorted(summary.compound_overview.items(), key=lambda x: -x[1])
-            )
-            lines.append(
-                f"    Overview : {overview}  "
-                f"({total_stints} stints, {len(summary.stint_summary)} drivers)"
-            )
-        for d in summary.stint_summary:
-            parts: list[str] = []
-            for s in d.stints:
-                compound = s.compound or "?"
-                if s.lap_start is not None and s.lap_end is not None:
-                    lap_range = f"laps {s.lap_start}–{s.lap_end}"
-                elif s.lap_start is not None:
-                    lap_range = f"from lap {s.lap_start}"
-                else:
-                    lap_range = "laps ?"
-                age = f"{s.tyre_age_at_start} laps old" if s.tyre_age_at_start else "new"
-                parts.append(f"S{s.stint_number or '?'} {compound} {lap_range} ({age})")
-            lines.append(f"    {d.driver_name} (#{d.driver_number}): {', '.join(parts)}")
-    else:
-        lines.append("  Tyres   : GridPulse does not have synced stint/tyre data for this session.")
+    # ── Tyre / strategy ───────────────────────────────────────────────────────
+    lines.extend(_ai_strategy_lines(session, db, user))
 
     # ── Weather summary ───────────────────────────────────────────────────────
     if summary.has_weather_data and summary.weather:

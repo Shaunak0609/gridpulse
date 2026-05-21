@@ -1,4 +1,4 @@
-import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionDashboard, SessionDetail, SignupPayload, Stint, Team, TokenResponse, WeatherSample } from '../types'
+import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionDashboard, SessionDetail, SignupPayload, Stint, StrategyDashboard, Team, TokenResponse, WeatherSample } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -67,6 +67,18 @@ export const getSessionDashboard = (
     const data = await res.json()
     if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch session dashboard')
     return data as SessionDashboard
+  })
+
+export const getSessionStrategy = (
+  sessionId: number,
+  token?: string | null,
+): Promise<StrategyDashboard> =>
+  fetch(`${API_BASE}/sessions/${sessionId}/strategy`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch session strategy')
+    return data as StrategyDashboard
   })
 
 // ─── Auth endpoints ──────────────────────────────────────────────────────────

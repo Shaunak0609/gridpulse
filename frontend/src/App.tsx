@@ -19,6 +19,7 @@ import Dashboard from './pages/Dashboard'
 import AIAssistant from './pages/AI'
 import SessionDetail from './pages/SessionDetail'
 import SessionDashboardPage from './pages/SessionDashboard'
+import StrategyDashboardPage from './pages/StrategyDashboard'
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
             <Route path="/drivers/:id" element={<DriverDetail />} />
             <Route path="/teams" element={<Teams />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/sessions/:id/strategy" element={<StrategyDashboardPage />} />
             <Route path="/sessions/:id/dashboard" element={<SessionDashboardPage />} />
             <Route path="/sessions/:id" element={<SessionDetail />} />
             <Route path="/standings" element={<Standings />} />

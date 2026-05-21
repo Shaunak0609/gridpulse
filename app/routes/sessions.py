@@ -17,9 +17,11 @@ from app.schemas.lap import LapResponse
 from app.schemas.race_control_message import RaceControlMessageResponse
 from app.schemas.session import SessionDetailResponse, SessionResponse
 from app.schemas.session_dashboard import SessionDashboardResponse
+from app.schemas.strategy_dashboard import StrategyDashboardResponse
 from app.schemas.stint import StintResponse
 from app.schemas.weather_sample import WeatherSampleResponse
 from app.services.session_dashboard import get_session_summary
+from app.services.strategy_dashboard import get_strategy_summary
 
 router = APIRouter(tags=["sessions"])
 
@@ -168,6 +170,32 @@ def get_session_dashboard(
             detail=f"Session with id {session_id} not found.",
         )
     return SessionDashboardResponse.from_summary(summary)
+
+
+@router.get("/sessions/{session_id}/strategy", response_model=StrategyDashboardResponse)
+def get_session_strategy(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_user),
+):
+    """
+    Return a strategy summary for one session.
+
+    Public endpoint — no token required.
+    If a valid Bearer token is provided, the response marks favourite
+    drivers with is_favourite=True in driver_strategies.
+
+    Returns 404 if the session does not exist.
+    Returns the full schema with has_stint_data=False (and empty strategy
+    sections) when the session has not been synced or has no tyre data.
+    """
+    summary = get_strategy_summary(session_id, db, current_user)
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with id {session_id} not found.",
+        )
+    return StrategyDashboardResponse.from_summary(summary)
 
 
 @router.get("/sessions/{session_id}/laps", response_model=list[LapResponse])

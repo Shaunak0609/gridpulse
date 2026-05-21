@@ -313,6 +313,89 @@ export interface DashboardWeatherSummary {
   latest_sample: DashboardLatestWeatherSample | null
 }
 
+// ─── Strategy Dashboard ──────────────────────────────────────────────────────
+// Mirrors app/schemas/strategy_dashboard.py — StrategyDashboardResponse
+
+export interface StrategyCompoundUsage {
+  compound: string
+  stint_count: number
+  driver_count: number
+  avg_stint_laps: number | null
+}
+
+export interface StrategyStintSummary {
+  stint_number: number | null
+  compound: string | null
+  lap_start: number | null
+  lap_end: number | null
+  tyre_age_at_start: number | null
+  stint_laps: number | null
+}
+
+export interface StrategyDriverSummary {
+  driver_number: number
+  driver_name: string
+  stop_count: number
+  compound_sequence: string[]
+  stints: StrategyStintSummary[]
+  longest_stint_laps: number | null
+  is_favourite: boolean
+}
+
+export interface StrategyPitWindow {
+  window_number: number
+  lap_min: number
+  lap_max: number
+  driver_count: number
+}
+
+export interface StrategyRCEvent {
+  lap_number: number | null
+  flag: string | null
+  message: string
+}
+
+export interface StrategyRaceControlContext {
+  events: StrategyRCEvent[]
+  total_strategy_events: number
+}
+
+export interface StrategyWeatherContext {
+  had_rain: boolean
+  wet_tyre_drivers: string[]
+  air_min: number | null
+  air_max: number | null
+  track_min: number | null
+  track_max: number | null
+  sample_count: number
+  latest_air_temp: number | null
+  latest_track_temp: number | null
+  latest_rainfall: boolean | null
+}
+
+export interface StrategyDashboard {
+  session_id: number
+  session_name: string
+  session_type: string
+  race_name: string
+  circuit_short_name: string | null
+  country_name: string | null
+  start_time: string | null
+  is_synced: boolean
+  has_stint_data: boolean
+  has_lap_data: boolean
+  has_rc_data: boolean
+  has_weather_data: boolean
+  compound_usage: StrategyCompoundUsage[]
+  driver_strategies: StrategyDriverSummary[]
+  // JSON object keys are always strings; backend int keys (1, 2) become "1", "2"
+  stop_count_groups: Record<string, string[]>
+  pit_windows: StrategyPitWindow[]
+  race_control: StrategyRaceControlContext
+  weather: StrategyWeatherContext | null
+  insights: string[]
+}
+
 export interface SessionDashboard {
   session_id: number
   session_name: string
