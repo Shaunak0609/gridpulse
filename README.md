@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 12
+## Current Status — Phase 13
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -398,6 +398,132 @@ Phase 12 adds a structured per-session dashboard built entirely from stored Open
 - Pit stop duration data
 - Qualifying or practice result tables
 
+### Phase 13 — Strategy Dashboard (complete)
+
+Phase 13 adds a dedicated strategy page built entirely from stored OpenF1 historical data. It organises tyre compound usage, per-driver stint sequences, pit windows, strategy-relevant race control events, and weather into a single readable page — with rule-based insights derived purely from stored data. No ML, no live timing.
+
+**What Phase 13 added:**
+
+- `app/services/strategy_dashboard.py` — new strategy service. Single source of truth for all strategy data, used by both the API endpoint and the AI context builder:
+  - `build_strategy_summary(session, db, current_user)` — computes compound usage, stop counts, pit windows, per-driver compound sequences, wet-tyre detection, and rule-based insights
+  - Pit windows are derived by clustering `lap_start` values of 2nd+ stints per driver, grouping events within a ±6-lap gap
+  - Strategy-relevant RC filter: excludes BLUE flag messages; includes YELLOW, DOUBLE YELLOW, RED, SAFETY CAR flags and keywords VSC, RED FLAG, PIT LANE, RISK OF RAIN, WEATHER, MEDICAL CAR, RETIRED
+  - `format_strategy_context_lines(summary)` — compact text output for AI context integration (not used directly; `_ai_strategy_lines()` in `ai_context.py` produces a tailored subset)
+
+- `app/schemas/strategy_dashboard.py` — Pydantic response models and `from_summary()` converter:
+
+  | Schema | Description |
+  |---|---|
+  | `StrategyCompoundUsage` | Compound name, stint count, driver count, average stint length |
+  | `StrategyStintSummary` | Stint number, compound, lap range, tyre age, derived lap count |
+  | `StrategyDriverSummary` | All strategy data for one driver; `stop_count`, `compound_sequence`, `longest_stint_laps`, `is_favourite` |
+  | `StrategyPitWindow` | 1-based window number, earliest and latest pit lap, driver count |
+  | `StrategyRCEvent` | Lap number, flag, message for one strategy-relevant RC entry |
+  | `StrategyRaceControlContext` | Filtered RC events and total count |
+  | `StrategyWeatherContext` | Rain status, wet-tyre driver list, air/track temperature range, latest reading |
+  | `StrategyDashboardResponse` | Top-level response; all sections plus `has_*` availability flags and a `insights` string list |
+
+- `GET /sessions/{session_id}/strategy` — new endpoint added to `sessions.py`. Public with optional Bearer token for favourite-driver highlighting. Returns `404` if the session does not exist. Uses `get_optional_user` so unauthenticated callers receive a valid response without authentication errors. Route declared before `/sessions/{session_id}` to avoid path collision.
+
+- Frontend `getSessionStrategy(sessionId, token?)` in `api.ts` — fetches the strategy endpoint. Passes the JWT as a Bearer token if the user is logged in so `is_favourite` flags are populated.
+
+- Frontend `/sessions/:id/strategy` page (`StrategyDashboard.tsx`):
+  - Public route — accessible without login; favourite-driver highlighting appears for logged-in users only
+  - Waits for `authLoading` to resolve before fetching, preventing an unauthenticated request followed by an authenticated one
+  - Declared before `/sessions/:id` in `App.tsx` to avoid React Router treating "strategy" as a session ID
+
+- **Strategy Dashboard sections:**
+
+  | Section | Contents | Shown when |
+  |---|---|---|
+  | Session summary | Race name, circuit, country, date, sync status | Always |
+  | Strategy insights | Rule-based sentences derived from stored data | `has_stint_data = true` |
+  | Compound usage | Cards per compound: stint count, driver count, average stint length | `has_stint_data = true` |
+  | Driver strategies | Per-driver cards with compound sequence, stop count, stint table, longest-stint highlight | `has_stint_data = true` |
+  | Stop count groups | Drivers grouped by number of pit stops | `has_stint_data = true` |
+  | Pit windows | Table of clustered pit lap ranges with an approximation disclaimer | `has_stint_data = true` and stop data available |
+  | Race control | Strategy-relevant events with per-event cautious context notes | `has_rc_data = true` |
+  | Weather | Session range (air/track min–max, rainfall) + latest reading (temp, humidity, wind) | `has_weather_data = true` |
+
+- **Rule-based insights** — `_generate_insights()` produces up to nine plain-English sentences from pre-computed data. No ML, no predictions:
+  1. Data completeness warning if >30% of stints are missing lap ranges
+  2. Most-used compound with average stint length
+  3. Driver with the most stints (or multiple drivers if tied)
+  4. Driver and compound for the longest single stint
+  5. Multi-compound vs single-compound driver split
+  6. Named single-compound drivers (when ≤5)
+  7. Wet-weather tyre usage by driver name
+  8. Rain recorded with no wet-tyre compound data (data gap note)
+  9. Track temperature variance ≥10°C (cautious wording)
+
+- **Favourite-driver highlighting:** drivers with `is_favourite = true` are sorted to the top of the driver strategies list, shown with a red border and a ★ star. The longest stint for each driver is highlighted in amber in their stint table.
+
+- **Empty states:** each section shows a specific message when its `has_*` flag is false. A page-level footnote explains the OpenF1 sync dependency.
+
+- **Navigation links:**
+  - Calendar page — past session rows now show "Dashboard →" and "Strategy →" links stacked vertically in the same column
+  - Session Dashboard nav bar — "Strategy →" link added alongside the existing "Raw data →" and "← Calendar" links
+
+**AI context improvements:**
+
+- `app/services/ai_service.py` — system prompt updated with a STRATEGY section. The model is explicitly told to: use only stored stint data; never invent pit stops, compound choices, undercuts, or overcuts; reference the per-driver compound sequences for "What tyres did X run?" questions; use stop counts for "How many stops?" questions; say "GridPulse does not have enough synced stint data to answer that" when `no_stint_data` is flagged.
+
+- `app/services/ai_context.py` — the verbose per-driver stint block in `_session_block()` is replaced by `_ai_strategy_lines()`, a new helper that:
+  - Calls `build_strategy_summary()` — consistent with what the strategy endpoint and page use
+  - Emits compact compound usage, stop-count totals (counts only, not driver name lists), pit windows, and per-driver compound sequences capped at `_AI_MAX_STRATEGY_DRIVERS = 20`
+  - Includes up to `_AI_MAX_INSIGHTS = 4` rule-based insight sentences
+  - Does not duplicate RC events or weather — those are covered by the existing blocks in `_session_block()`
+
+**Token budget safeguards:**
+
+| Cap | Value | Purpose |
+|---|---|---|
+| `_MAX_SYNCED_SESSIONS` | 2 | Session blocks included in the AI context |
+| `_AI_MAX_RC` | 15 | RC messages per session (service-level cap is 25) |
+| `_AI_MAX_DRIVER_LAPS` | 10 | Per-driver rows in qualifying/FP lap table |
+| `_AI_MAX_STRATEGY_DRIVERS` | 20 | Per-driver strategy rows per session |
+| `_AI_MAX_INSIGHTS` | 4 | Rule-based insight sentences per session |
+
+**What the AI can answer from strategy data:**
+- Tyre compound breakdown for a synced session (most used compound, stint counts, average stint length)
+- Total pit stop counts per group ("19 drivers made 1 stop, 2 made 2 stops")
+- Approximate pit window lap ranges derived from stint transitions
+- Per-driver compound sequences ("Verstappen ran MEDIUM → HARD with 1 stop, longest stint 31 laps")
+- Driver with the longest single stint and the compound used
+- Rule-based insights derived from stored data
+
+**What the AI still cannot answer if data is missing:**
+- Anything flagged `no_stint_data` — the AI states exactly what is absent and does not guess
+- Exact pit stop timing or official pit durations — pit windows are derived from stint transitions, not official timing
+- Undercuts, overcuts, and strategic decisions — the AI is explicitly instructed not to make these inferences
+- Official finishing order or post-race classifications
+- Individual lap times or sector times per driver
+- Qualifying grid positions or pole times
+
+**How to sync data before using the Strategy Dashboard:**
+
+The Strategy Dashboard requires OpenF1 data for the session to be synced first. Without it, all sections show empty states with `has_* = false`.
+
+1. Find the OpenF1 session key:
+   ```bash
+   python scripts/sync_openf1_session.py --list 2026
+   ```
+2. Sync the session:
+   ```bash
+   python scripts/sync_openf1_session.py --session-key <key>
+   ```
+3. Open the Calendar page and click **Strategy →** on any past session row, or navigate directly to `/sessions/:id/strategy`.
+
+**What is not included in Phase 13:**
+- Live timing of any kind — all data is from stored OpenF1 historical snapshots
+- WebSockets, Redis, or any real-time transport
+- Track map or moving driver position dots
+- Lap time charts, pace trend charts, or any visualisation layer
+- ML predictions or strategy recommendations
+- Official pit stop timing or duration data — pit windows are derived from stint transitions
+- Tyre degradation trend analysis — requires per-lap compound data not currently tracked
+- Qualifying or practice session strategy views — the page works best for race and sprint sessions
+
 ---
 
 ### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
@@ -527,7 +653,8 @@ gridpulse/
 │   │   ├── stint.py              # StintResponse (Phase 11)
 │   │   ├── race_control_message.py  # RaceControlMessageResponse (Phase 11)
 │   │   ├── weather_sample.py     # WeatherSampleResponse (Phase 11)
-│   │   └── session_dashboard.py  # SessionDashboardResponse and all nested schemas (Phase 12)
+│   │   ├── session_dashboard.py  # SessionDashboardResponse and all nested schemas (Phase 12)
+│   │   └── strategy_dashboard.py # StrategyDashboardResponse and nested schemas; from_summary() converter (Phase 13)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -539,7 +666,7 @@ gridpulse/
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
 │   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoint (Phase 6/9.5)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
-│   │   ├── sessions.py           # GET /sessions/upcoming, /synced, /races/{id}/sessions, /sessions/{id}, historical data + dashboard endpoints (Phase 7.5/11/12)
+│   │   ├── sessions.py           # GET /sessions/upcoming, /synced, /races/{id}/sessions, /sessions/{id}, dashboard + strategy endpoints (Phase 7.5/11/12/13)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
 │   │   ├── dashboard.py          # GET /me/dashboard (Phase 8)
 │   │   └── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
@@ -549,11 +676,12 @@ gridpulse/
 │   │   ├── email_service.py      # Resend wrapper (Phase 7)
 │   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
 │   │   ├── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
-│   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic (Phase 10)
-│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; uses session_dashboard service (Phase 10/11/12)
+│   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic; strategy-aware system prompt (Phase 10/13)
+│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; strategy context via _ai_strategy_lines() (Phase 10/11/12/13)
 │   │   ├── openf1_client.py      # HTTP client for OpenF1 API — fetch_laps, fetch_stints, fetch_race_control, fetch_weather, etc. (Phase 11)
 │   │   ├── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
-│   │   └── session_dashboard.py  # build_session_summary() — single source of truth for dashboard data (Phase 12)
+│   │   ├── session_dashboard.py  # build_session_summary() — single source of truth for dashboard data (Phase 12)
+│   │   └── strategy_dashboard.py # build_strategy_summary() — compound usage, pit windows, insights; used by endpoint + AI context (Phase 13)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -871,6 +999,7 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/sessions/{session_id}/race-control` | All stored race control messages for a session, ordered by timestamp |
 | GET | `/sessions/{session_id}/weather` | All stored weather samples for a session, ordered by timestamp |
 | GET | `/sessions/{session_id}/dashboard` | Structured dashboard summary — lap stats, derived finishing order, tyre strategy, race control, weather; optional Bearer token for favourite-driver highlighting |
+| GET | `/sessions/{session_id}/strategy` | Strategy dashboard — compound usage, per-driver stint sequences, pit windows, strategy-relevant RC events, weather context, rule-based insights; optional Bearer token for favourite-driver highlighting |
 | GET | `/sessions/synced` | All sessions linked to an OpenF1 session key, ordered by start time descending |
 
 ### Authentication endpoints
@@ -1829,6 +1958,92 @@ After syncing a session, go to `http://localhost:5173/ai` and try:
 
 ---
 
+## Testing the Strategy Dashboard
+
+### Prerequisites
+
+The Strategy Dashboard only shows data for sessions that have been synced via `sync_openf1_session.py`. Sync at least one race session before testing (see the **OpenF1 Session Sync** section above).
+
+### Test the backend endpoint
+
+```bash
+uvicorn app.main:app --reload
+```
+
+```bash
+# Replace 15 with the session_id of a synced session
+curl http://localhost:8000/sessions/15/strategy | python3 -m json.tool
+```
+
+Expected: a JSON object with `session_id`, `is_synced: true`, populated `compound_usage`, `driver_strategies`, `pit_windows`, `race_control`, `weather`, and `insights`.
+
+For an unsynced session:
+```bash
+curl http://localhost:8000/sessions/1/strategy | python3 -m json.tool
+# Expect: is_synced: false, has_stint_data: false, driver_strategies: [], insights: [...]
+```
+
+### Test favourite-driver highlighting
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"yourpass"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl http://localhost:8000/sessions/15/strategy \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | grep is_favourite
+```
+
+Expected: `"is_favourite": true` for any driver the user has favourited.
+
+### Test the frontend Strategy Dashboard
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Go to `http://localhost:5173/calendar`
+3. Expand any past race — each session row shows both **Dashboard →** and **Strategy →** links
+4. Click **Strategy →** — you are taken to `/sessions/:id/strategy`
+5. If the session has not been synced: all sections show "No data synced yet" empty states
+6. If the session has been synced: all sections fill in with real data
+
+### Verify each strategy section
+
+| Section | What to check |
+|---|---|
+| Session summary | Race name, circuit, country, and date match the session |
+| Insights | At least one insight appears; no invented data — each sentence references counts or names from the data |
+| Compound usage | Cards match the `stints` table compound breakdown; avg stint length is plausible |
+| Driver strategies | Each driver's compound sequence matches their stints; longest stint is highlighted in amber |
+| Stop count groups | Grouped correctly — a driver with 2 stints shows "1 stop" |
+| Pit windows | Lap ranges cluster around the real pit lap numbers from the `stints` table |
+| Race control | Only strategy-relevant messages (safety car, VSC, red flag) appear; blue-flag messages are excluded |
+| Weather | Session range and latest reading match the `weather_samples` table |
+
+### Test favourite-driver highlighting in the frontend
+
+1. Log in and favourite at least one driver on the Drivers page
+2. Navigate to the strategy dashboard for a synced race session
+3. The favourited driver's card should appear first in the driver strategies list, with a red border and a ★ star
+
+### Test AI questions about strategy data
+
+After syncing a session, go to `http://localhost:5173/ai` and try:
+
+| Prompt | Expected behaviour |
+|---|---|
+| `What tyre compounds were used in the Japanese Grand Prix?` | Lists compounds with stint counts and averages |
+| `How many pit stops did drivers make?` | Gives stop-count breakdown (e.g. "19 drivers made 1 stop") |
+| `What tyres did [driver] run?` | Reads the per-driver compound sequence from context |
+| `Was there a safety car and could it have affected strategy?` | Answers from strategy RC events; uses cautious language |
+| `What was the track temperature and could it have affected tyres?` | Gives temperature range; notes variance if large |
+| `Who ran the longest stint?` | Names the driver and compound from the insights block |
+| `What was [driver]'s fastest lap time?` | Says GridPulse does not store individual lap times |
+| `Did anyone undercut Verstappen?` | Declines to invent strategy interpretations |
+
+**Note on AI accuracy:** GridPulse uses `llama-3.1-8b-instant` by default. This small model handles aggregate questions well (compound counts, stop totals) but may miss precise per-driver lookups in long contexts. For more reliable per-driver answers, try upgrading to `llama-3.3-70b-versatile` in your `.env` file.
+
+---
+
 ## FastF1 — Future Integration Plan
 
 FastF1 is a Python library (not used in Phase 11) that provides data OpenF1 does not:
@@ -1863,13 +2078,14 @@ The following features are planned but not yet built:
 - Multi-turn conversation threading — each question is currently independent (single-turn Q&A)
 - Streaming responses (WebSocket or Server-Sent Events)
 
-**Historical data (partial — Phase 12 complete, gaps remaining):**
+**Historical data (partial — Phase 13 complete, gaps remaining):**
 - Official race classifications — the dashboard finishing order is derived from lap timing; post-race penalties and DSQs are not reflected
 - Qualifying results and grid positions — no `qualifying_results` table yet
-- Individual lap time charts and analytics — data is stored but visualisations are Phase 13+
+- Lap time charts, pace trend charts, driver comparison visualisations — data is stored but no chart layer yet (Phase 14)
 - Automatic session sync — the sync script must still be run manually
 - FastF1 telemetry (speed traces, throttle, GPS position) — planned for analytics phase
-- Pit stop duration data
+- Pit stop duration data — pit windows are derived from stint transitions, not official timing
+- Tyre degradation trend analysis — requires per-lap compound tracking not currently stored
 
 **Notifications:**
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
@@ -1931,8 +2147,8 @@ OpenF1 API client, ingestion service, and sync script. Four new tables: laps, st
 **Phase 12 — Historical Race Dashboard** *(complete)*
 Structured per-session dashboard at `GET /sessions/{id}/dashboard` and `/sessions/:id/dashboard`. Sections: derived finishing order, tyre strategy per driver, key race control events, weather with latest reading, favourite-driver highlighting. AI context refactored to use the dashboard service as a single source of truth; missing-data flags, per-driver lap table, and token budget safeguards added.
 
-**Phase 13 — Strategy Dashboard**
-Tyre strategy timeline, stint history per driver, pit window context, tyre degradation trends, and pit stop comparison.
+**Phase 13 — Strategy Dashboard** *(complete)*
+Dedicated strategy page at `GET /sessions/{id}/strategy` and `/sessions/:id/strategy`. Sections: compound usage cards, per-driver stint sequences with longest-stint highlighting, stop-count grouping, derived pit windows, strategy-relevant race control events with context notes, weather conditions. Rule-based insights derived from stored data — no ML. Favourite-driver cards sorted first. Navigation links added to Calendar and Session Dashboard. AI context updated with compact strategy summaries; system prompt updated with explicit strategy-grounding rules; token budget safeguards maintained.
 
 **Phase 14 — Advanced Analytics**
 Driver comparison, team comparison, pace trends, lap time charts, qualifying vs race pace, teammate delta, and analytics visualisations.
