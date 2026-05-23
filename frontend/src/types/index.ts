@@ -396,6 +396,110 @@ export interface StrategyDashboard {
   insights: string[]
 }
 
+// ─── Advanced Analytics ──────────────────────────────────────────────────────
+// Mirrors app/schemas/analytics.py
+
+export interface AnalyticsDriverSummary {
+  driver_number: number
+  driver_name: string
+  lap_count: number
+  timed_lap_count: number
+  fastest_lap: number | null
+  average_lap: number | null
+  best_s1: number | null
+  best_s2: number | null
+  best_s3: number | null
+  is_favourite: boolean
+}
+
+export interface AnalyticsCompoundUsage {
+  compound: string
+  avg_lap_time: number | null
+  fastest_lap_time: number | null
+  driver_count: number
+  sample_lap_count: number
+}
+
+export interface AnalyticsStintEntry {
+  driver_number: number
+  driver_name: string
+  stint_number: number | null
+  compound: string | null
+  lap_start: number | null
+  lap_end: number | null
+  avg_lap_time: number | null
+  laps_counted: number
+  is_favourite: boolean
+}
+
+export interface AnalyticsTireSummary {
+  compound_pace: AnalyticsCompoundUsage[]
+  stint_pace: AnalyticsStintEntry[]
+  has_compound_pace: boolean
+}
+
+export interface AnalyticsTeammateComparison {
+  team_name: string
+  driver_a_number: number
+  driver_a_name: string
+  driver_a_fastest: number | null
+  driver_a_avg: number | null
+  driver_b_number: number
+  driver_b_name: string
+  driver_b_fastest: number | null
+  driver_b_avg: number | null
+  fastest_delta: number | null
+  avg_delta: number | null
+}
+
+export interface AnalyticsRaceContext {
+  rc_total: number
+  safety_car_laps: number[]
+  red_flag_laps: number[]
+}
+
+export interface AnalyticsWeather {
+  air_temperature: number | null
+  track_temperature: number | null
+  humidity: number | null
+  rainfall: boolean | null
+  wind_speed: number | null
+}
+
+export interface SessionAnalytics {
+  session_id: number
+  session_name: string
+  session_type: string
+  race_name: string
+  circuit_short_name: string | null
+  country_name: string | null
+  start_time: string | null
+  is_synced: boolean
+  has_lap_data: boolean
+  has_stint_data: boolean
+  has_rc_data: boolean
+  has_weather_data: boolean
+  has_compound_pace: boolean
+  session_fastest_lap: number | null
+  session_fastest_driver: string | null
+  session_avg_lap: number | null
+  driver_pace: AnalyticsDriverSummary[]
+  tire_analytics: AnalyticsTireSummary
+  teammate_comparisons: AnalyticsTeammateComparison[]
+  race_context: AnalyticsRaceContext
+  weather: AnalyticsWeather | null
+  data_note: string | null
+}
+
+export interface DriverComparisonAnalytics {
+  driver_a: AnalyticsDriverSummary
+  driver_b: AnalyticsDriverSummary
+  fastest_delta: number | null
+  avg_delta: number | null
+  driver_a_stints: AnalyticsStintEntry[]
+  driver_b_stints: AnalyticsStintEntry[]
+}
+
 export interface SessionDashboard {
   session_id: number
   session_name: string

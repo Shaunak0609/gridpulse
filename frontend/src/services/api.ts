@@ -1,4 +1,4 @@
-import type { AIHistoryItem, AIResponse, AIUsage, AuthUser, Dashboard, Driver, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionDashboard, SessionDetail, SignupPayload, Stint, StrategyDashboard, Team, TokenResponse, WeatherSample } from '../types'
+import type { AIHistoryItem, AIResponse, AIUsage, AnalyticsTireSummary, AuthUser, Dashboard, Driver, DriverComparisonAnalytics, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionAnalytics, SessionDashboard, SessionDetail, SignupPayload, Stint, StrategyDashboard, Team, TokenResponse, WeatherSample } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -79,6 +79,47 @@ export const getSessionStrategy = (
     const data = await res.json()
     if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch session strategy')
     return data as StrategyDashboard
+  })
+
+// ─── Analytics endpoints ─────────────────────────────────────────────────────
+
+export const getSessionAnalytics = (
+  sessionId: number,
+  token?: string | null,
+): Promise<SessionAnalytics> =>
+  fetch(`${API_BASE}/analytics/sessions/${sessionId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch session analytics')
+    return data as SessionAnalytics
+  })
+
+export const compareSessionDrivers = (
+  sessionId: number,
+  driver1: number,
+  driver2: number,
+  token?: string | null,
+): Promise<DriverComparisonAnalytics> =>
+  fetch(
+    `${API_BASE}/analytics/sessions/${sessionId}/compare?driver1=${driver1}&driver2=${driver2}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  ).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to compare drivers')
+    return data as DriverComparisonAnalytics
+  })
+
+export const getSessionTireAnalytics = (
+  sessionId: number,
+  token?: string | null,
+): Promise<AnalyticsTireSummary> =>
+  fetch(`${API_BASE}/analytics/sessions/${sessionId}/tires`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to fetch tire analytics')
+    return data as AnalyticsTireSummary
   })
 
 // ─── Auth endpoints ──────────────────────────────────────────────────────────

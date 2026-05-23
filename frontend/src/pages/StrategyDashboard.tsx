@@ -709,6 +709,12 @@ export default function StrategyDashboardPage() {
         >
           Session dashboard →
         </Link>
+        <Link
+          to={`/sessions/${session_id}/analytics`}
+          className="text-gray-600 hover:text-purple-400 transition-colors"
+        >
+          Analytics →
+        </Link>
       </div>
 
       {/* Session header */}

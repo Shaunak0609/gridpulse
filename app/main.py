@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import drivers, teams, calendar, standings, auth, users, google_auth, reminders, notifications, email, sessions, favorites, dashboard, ai
+from app.routes import drivers, teams, calendar, standings, auth, users, google_auth, reminders, notifications, email, sessions, favorites, dashboard, ai, analytics
 
 load_dotenv()
 
@@ -33,6 +33,7 @@ app.include_router(sessions.router)
 app.include_router(favorites.router)
 app.include_router(dashboard.router)
 app.include_router(ai.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

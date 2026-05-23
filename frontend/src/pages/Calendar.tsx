@@ -195,9 +195,9 @@ function SessionPanel({
                 </div>
               )}
 
-              {/* Dashboard + Strategy links for past sessions; layout placeholder otherwise */}
+              {/* Dashboard, Strategy, and Analytics links for past sessions */}
               {past ? (
-                <div className="shrink-0 w-28 text-right space-y-0.5">
+                <div className="shrink-0 w-32 text-right space-y-0.5">
                   <Link
                     to={`/sessions/${session.id}/dashboard`}
                     className="block text-xs text-gray-500 hover:text-red-400 transition-colors"
@@ -210,9 +210,15 @@ function SessionPanel({
                   >
                     Strategy →
                   </Link>
+                  <Link
+                    to={`/sessions/${session.id}/analytics`}
+                    className="block text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                  >
+                    Analytics →
+                  </Link>
                 </div>
               ) : !session.start_time ? (
-                <div className="shrink-0 w-28" />
+                <div className="shrink-0 w-32" />
               ) : null}
             </div>
           )

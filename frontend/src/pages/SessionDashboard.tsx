@@ -570,6 +570,12 @@ export default function SessionDashboardPage() {
           Strategy →
         </Link>
         <Link
+          to={`/sessions/${sessionId}/analytics`}
+          className="text-gray-600 hover:text-purple-400 transition-colors"
+        >
+          Analytics →
+        </Link>
+        <Link
           to={`/sessions/${sessionId}`}
           className="text-gray-600 hover:text-gray-400 transition-colors"
         >
