@@ -13,6 +13,7 @@ from app.models.reminder import Reminder
 from app.models.session import Session as RaceSession
 from app.models.standing import DriverStanding
 from app.models.user import User
+from app.services.analytics_service import build_session_analytics
 from app.services.session_dashboard import build_session_summary
 from app.services.strategy_dashboard import build_strategy_summary
 
@@ -33,6 +34,7 @@ _AI_MAX_RC = 15             # RC messages per session (service cap is 40)
 _AI_MAX_DRIVER_LAPS = 10    # per-driver lap rows for qualifying/FP sessions
 _AI_MAX_STRATEGY_DRIVERS = 20  # per-driver strategy rows in AI context
 _AI_MAX_INSIGHTS = 4            # rule-based insight sentences to include
+_AI_MAX_ANALYTICS_DRIVERS = 20 # per-driver pace rows in analytics context
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -119,6 +121,83 @@ def _ai_strategy_lines(session: RaceSession, db: Session, user: User) -> list[st
     return lines
 
 
+def _ai_analytics_lines(session: RaceSession, db: Session, user: User) -> list[str]:
+    """
+    Compact pace analytics for one synced session.
+
+    Adds per-driver fastest and average lap times, compound pace averages,
+    and safety-car / red-flag lap numbers (which explain anomalous slow laps).
+    RC and weather are emitted separately in _session_block — no duplication.
+
+    Skipped entirely when has_lap_data is False — _session_block already emits
+    the 'Missing: no_lap_data' flag, so we avoid a redundant line.
+    """
+    try:
+        summary = build_session_analytics(session, db, user)
+    except Exception:
+        return []
+
+    if not summary.has_lap_data:
+        return []
+
+    lines: list[str] = ["  Analytics:"]
+
+    # Session-level pace stats
+    if summary.session_fastest_lap is not None:
+        lines.append(
+            f"    Session fastest: {summary.session_fastest_lap:.3f}s "
+            f"({summary.session_fastest_driver})"
+        )
+    if summary.session_avg_lap is not None:
+        lines.append(f"    Session avg    : {summary.session_avg_lap:.3f}s (all timed laps)")
+
+    # Per-driver pace — all drivers with at least one timed lap, capped
+    drivers_with_data = [dp for dp in summary.driver_pace if dp.fastest_lap is not None]
+    shown = drivers_with_data[:_AI_MAX_ANALYTICS_DRIVERS]
+    extra = len(drivers_with_data) - len(shown)
+    if shown:
+        suffix = f" ({extra} more not shown)" if extra else ""
+        lines.append(f"    Per-driver pace{suffix}:")
+        for dp in shown:
+            avg_str = (
+                f", avg {dp.average_lap:.3f}s"
+                if dp.average_lap is not None
+                else ""
+            )
+            lines.append(
+                f"      {dp.driver_name} (#{dp.driver_number}): "
+                f"fastest {dp.fastest_lap:.3f}s{avg_str}"
+            )
+
+    # Compound pace averages
+    if summary.has_compound_pace and summary.compound_pace:
+        parts: list[str] = []
+        for cp in summary.compound_pace:
+            if cp.avg_lap_time is not None:
+                parts.append(
+                    f"{cp.compound} avg {cp.avg_lap_time:.3f}s ({cp.sample_lap_count} laps)"
+                )
+        if parts:
+            lines.append("    Compound pace  : " + "; ".join(parts))
+    elif not summary.has_compound_pace:
+        lines.append("    Compound pace  : unavailable (stints lack lap_start/lap_end ranges)")
+
+    # Safety car and red flag laps — important for pace interpretation
+    if summary.safety_car_laps:
+        laps_str = ", ".join(str(l) for l in summary.safety_car_laps[:8])
+        lines.append(
+            f"    Safety car laps: {laps_str} — lap times on these laps are not race pace"
+        )
+    if summary.red_flag_laps:
+        laps_str = ", ".join(str(l) for l in summary.red_flag_laps[:5])
+        lines.append(f"    Red flag laps  : {laps_str}")
+
+    if summary.data_note:
+        lines.append(f"    Note: {summary.data_note}")
+
+    return lines
+
+
 def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
     """
     Build a compact AI-readable summary block for one synced session.
@@ -187,6 +266,9 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
                 f"    P{e.position}. {e.driver_name} (#{e.driver_number})  "
                 f"max_lap={e.max_lap}  rows={e.row_count}{suffix}"
             )
+
+    # ── Pace analytics ───────────────────────────────────────────────────────
+    lines.extend(_ai_analytics_lines(session, db, user))
 
     # ── Tyre / strategy ───────────────────────────────────────────────────────
     lines.extend(_ai_strategy_lines(session, db, user))
@@ -427,12 +509,13 @@ def build_context(user: User, db: Session) -> str:
         "  - Official race classifications (finishing positions above are derived",
         "    from lap timing — post-race penalties/DSQs are not reflected)",
         "  - Qualifying results, grid positions, or pole lap times",
-        "  - Individual lap times per driver (only aggregate counts are stored)",
+        "  - Full per-lap time sequences (only fastest, average, and sector best",
+        "    times are available per driver via the Analytics section above)",
         "  - Pit stop durations or exact pit timing",
         "  - Live race timing or telemetry of any kind",
         "  - Car telemetry (speed traces, throttle, brake, GPS position)",
-        "  Note: Tyre strategies, weather, and RC messages are stored only for",
-        "        sessions synced via the OpenF1 sync script.",
+        "  Note: Lap times, tyre strategies, weather, and RC messages are stored",
+        "        only for sessions synced via the OpenF1 sync script.",
     ]))
 
     return "\n\n".join(sections)

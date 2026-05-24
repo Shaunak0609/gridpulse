@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 13
+## Current Status — Phase 14
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -117,17 +117,27 @@ This repository contains the backend API built with Python and FastAPI.
 - Frontend Reminders page — session reminders show a session-type badge (e.g. "Qualifying") and a colour-coded dot; race reminders show a "Race" badge
 - `scripts/seed_sessions.py` — seeds five standard sessions per race derived from each race's `start_date`; safe to run multiple times
 
-### Phase 9.5 — Automated Notification Scheduling (complete)
+### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
 
-- `scripts/sync_f1_data.py` extended — after all F1 data sync steps complete, both notification generators (`generate_standing_notifications` and `generate_wins_notifications`) are called automatically using the same open database session; each generator is wrapped in its own `try/except` so a failure in one does not prevent the other from running
-- Sync script output now includes a clear **Favourite Driver Notifications** section after the sync summary, with per-type result blocks showing created, skipped, and email counts
-- `POST /notifications/generate-favorite-driver-updates` — new protected development endpoint; requires a valid JWT Bearer token; calls both generators and returns a `NotificationGenerationSummary` JSON response with `users_checked`, `favorite_drivers_checked`, `notifications_created`, and `duplicates_skipped`; documented in `/docs` as a manual/development trigger
-- `NotificationGenerationSummary` Pydantic schema added to `app/schemas/notification.py`
-- `scripts/generate_favorite_driver_notifications.py` — standalone script is unchanged; continues to work independently for cases where you want to generate notifications without re-running a full data sync
-- Duplicate notification prevention is unchanged — both the sync flow and the endpoint rely on the same dedup logic inside each generator
-
-**Normal workflow from Phase 9.5 onwards:**
-Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favourite-driver notification generation in a single command.
+- `favorite_drivers` table — stores one row per `(user_id, driver_id)` pair; unique constraint `uq_favorite_driver_user` prevents duplicate favourites
+- `favorite_teams` table — same pattern with `(user_id, team_id)` and unique constraint `uq_favorite_team_user`
+- `FavoriteDriver` and `FavoriteTeam` SQLAlchemy models with relationships to `User`, `Driver`, and `Team`
+- Nested Pydantic schemas: `FavoriteDriverResponse` embeds a full `FavoriteDriverInfo` (including the driver's team as `FavoriteTeamInfo`); `FavoriteTeamResponse` embeds `FavoriteTeamInfo`
+- `GET /me/favorites/drivers` — returns the current user's favourite drivers, ordered by when they were added (protected)
+- `POST /me/favorites/drivers/{driver_id}` — favourites a driver; returns `404` if the driver does not exist, `409` if already favourited (protected)
+- `DELETE /me/favorites/drivers/{driver_id}` — removes a favourite driver; returns `404` if not in the user's list (protected)
+- `GET /me/favorites/teams` — returns the current user's favourite teams, ordered by when they were added (protected)
+- `POST /me/favorites/teams/{team_id}` — favourites a team; returns `404` if the team does not exist, `409` if already favourited (protected)
+- `DELETE /me/favorites/teams/{team_id}` — removes a favourite team; returns `404` if not in the user's list (protected)
+- `GET /me/dashboard` — returns a personalised summary in one request: user profile, favourite drivers (with nested team info), favourite teams, next 5 upcoming sessions, next 5 upcoming reminders, 5 most recent notifications (protected)
+- Frontend favourite API functions: `getFavoriteDrivers`, `addFavoriteDriver`, `removeFavoriteDriver`, `getFavoriteTeams`, `addFavoriteTeam`, `removeFavoriteTeam`, `getDashboard`
+- Driver Detail page — star button appears for logged-in users; initial state loaded from `GET /me/favorites/drivers` on mount; toggles between ☆ Add to Favourites and ★ Favourited; logged-out users see a styled "Log in to favourite" prompt that matches the button shape
+- Teams page — each team card has an individual star button; initial state is pre-loaded from `GET /me/favorites/teams` on page load; card border turns red when favourited; logged-out users see a "Log in to favourite" prompt per card
+- Dashboard page (`/dashboard`) — protected route; shows six sections: Welcome heading, Favourite Drivers (with driver number and team, links to driver detail pages), Favourite Teams, Upcoming Sessions (colour-coded by session type), Upcoming Reminders, and Recent Notifications (unread highlighted in red)
+- Dashboard link added to the navbar — visible only when logged in
+- All Dashboard sections show informative empty states with dashed-border cards and action links pointing to the relevant page (Drivers, Teams, Calendar) — not blank areas
+- All session and reminder times display in the user's local browser timezone, not hard-coded UTC
+- `scripts/migrate_create_favorites_tables.py` — idempotent migration to add `favorite_drivers` and `favorite_teams` to an existing database; fresh databases use `create_tables.py` directly
 
 ### Phase 9 — Favourite Driver Notifications, Non-Live (complete)
 
@@ -158,6 +168,18 @@ Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favouri
 - Per-race finish position notifications — requires a `race_results` table (no race result data ingested yet)
 - Per-qualifying position notifications — requires a `qualifying_results` table
 - Live or real-time alerts of any kind
+
+### Phase 9.5 — Automated Notification Scheduling (complete)
+
+- `scripts/sync_f1_data.py` extended — after all F1 data sync steps complete, both notification generators (`generate_standing_notifications` and `generate_wins_notifications`) are called automatically using the same open database session; each generator is wrapped in its own `try/except` so a failure in one does not prevent the other from running
+- Sync script output now includes a clear **Favourite Driver Notifications** section after the sync summary, with per-type result blocks showing created, skipped, and email counts
+- `POST /notifications/generate-favorite-driver-updates` — new protected development endpoint; requires a valid JWT Bearer token; calls both generators and returns a `NotificationGenerationSummary` JSON response with `users_checked`, `favorite_drivers_checked`, `notifications_created`, and `duplicates_skipped`; documented in `/docs` as a manual/development trigger
+- `NotificationGenerationSummary` Pydantic schema added to `app/schemas/notification.py`
+- `scripts/generate_favorite_driver_notifications.py` — standalone script is unchanged; continues to work independently for cases where you want to generate notifications without re-running a full data sync
+- Duplicate notification prevention is unchanged — both the sync flow and the endpoint rely on the same dedup logic inside each generator
+
+**Normal workflow from Phase 9.5 onwards:**
+Running `python scripts/sync_f1_data.py` now handles F1 data refresh and favourite-driver notification generation in a single command.
 
 ### Phase 10 — AI Race Assistant (complete)
 
@@ -524,29 +546,150 @@ The Strategy Dashboard requires OpenF1 data for the session to be synced first. 
 - Tyre degradation trend analysis — requires per-lap compound data not currently tracked
 - Qualifying or practice session strategy views — the page works best for race and sprint sessions
 
+### Phase 14 — Advanced Analytics (complete)
+
+Phase 14 adds a dedicated analytics page built entirely from stored OpenF1 historical data. It computes and displays per-driver pace, compound performance, teammate comparisons, race control context, and weather — with Recharts visualisations and a side-by-side driver comparison tool. The AI context builder was updated to include analytics summaries so the assistant can answer pace-based questions.
+
+**What Phase 14 added:**
+
+- `app/services/analytics_service.py` — analytics computation layer. Single source of truth for all pace and performance data, used by both the API endpoints and the AI context builder:
+  - `build_session_analytics(session, db, current_user)` — computes per-driver fastest and average lap times, compound pace averages, teammate comparisons, safety car and red flag lap lists, and latest weather
+  - `compare_drivers(summary, driver_a, driver_b)` — returns a side-by-side comparison from pre-computed data, with delta values in seconds (negative = driver A faster)
+  - `get_session_analytics(session_id, db, current_user)` — fetches the session and builds the full summary; returns `None` if not found
+  - `_MIN_LAPS_FOR_AVERAGE = 3` — minimum timed laps before reporting an average (prevents noise from partial sessions)
+  - All pace calculations exclude `is_pit_out_lap = True` laps
+
+- `app/schemas/analytics.py` — Pydantic response models:
+
+  | Schema | Description |
+  |---|---|
+  | `DriverAnalyticsSummary` | Driver number, name, lap count, timed lap count, fastest lap, average lap, best sectors, `is_favourite` flag |
+  | `AnalyticsCompoundUsage` | Compound name, average and fastest lap time, driver count, sample lap count |
+  | `AnalyticsStintEntry` | Stint with driver, compound, lap range, average lap time, laps counted |
+  | `AnalyticsTireSummary` | Compound pace list, stint pace list, `has_compound_pace` flag |
+  | `TeammateComparisonSummary` | Team name, two drivers with fastest and average times, fastest and average delta (seconds) |
+  | `AnalyticsRaceContext` | Total RC message count, safety car lap list, red flag lap list |
+  | `AnalyticsWeatherSummary` | Air temperature, track temperature, humidity, rainfall, wind speed |
+  | `SessionAnalyticsResponse` | Top-level response; all sections plus `has_*` availability flags |
+  | `DriverComparisonResponse` | Two driver summaries with deltas and per-driver stint lists |
+
+- Three new analytics endpoints (all public with optional Bearer token for `is_favourite` highlighting):
+
+  | Method | Endpoint | Description |
+  |---|---|---|
+  | GET | `/analytics/sessions/{session_id}` | Full analytics summary — session pace, per-driver stats, compound averages, teammate comparisons, race context, weather |
+  | GET | `/analytics/sessions/{session_id}/compare` | Side-by-side comparison of two drivers; `?driver1=4&driver2=1` query params; `404` with a list of valid car numbers if a driver is not found |
+  | GET | `/analytics/sessions/{session_id}/tires` | Tire analytics only — compound pace averages and per-stint pace |
+
+- `app/routes/analytics.py` — analytics router with prefix `/analytics`, registered in `app/main.py`
+
+- Nine new TypeScript interfaces in `types/index.ts`: `AnalyticsDriverSummary`, `AnalyticsCompoundUsage`, `AnalyticsStintEntry`, `AnalyticsTireSummary`, `AnalyticsTeammateComparison`, `AnalyticsRaceContext`, `AnalyticsWeather`, `SessionAnalytics`, `DriverComparisonAnalytics`
+
+- Frontend analytics API functions in `api.ts`: `getSessionAnalytics`, `compareSessionDrivers`, `getSessionTireAnalytics`
+
+- Frontend `/sessions/:id/analytics` page (`AnalyticsDashboard.tsx`):
+  - Public route — accessible without login; favourite-driver highlighting appears for logged-in users only
+  - Both main analytics and tire analytics endpoints fetched in parallel via `Promise.all`
+  - Declared before `/sessions/:id` in `App.tsx` to avoid React Router treating "analytics" as a session ID
+
+- **Analytics page sections:**
+
+  | Section | Contents | Shown when |
+  |---|---|---|
+  | Session summary | Race name, circuit, country, date, sync status | Always |
+  | Session pace | Session fastest lap and driver, session average | `has_lap_data = true` |
+  | Driver pace table | Per-driver fastest and average lap, best sectors, lap count, `is_favourite` star | `has_lap_data = true` |
+  | Compound pace | Average and fastest lap per compound, driver count, sample lap count | `has_stint_data = true` and `has_compound_pace = true` |
+  | Teammate comparisons | Side-by-side delta for each pair of teammates on the same team | `has_lap_data = true` and team data available |
+  | Race control context | Total RC messages, safety car laps, red flag laps | `has_rc_data = true` |
+  | Weather | Air/track temp, humidity, rainfall, wind | `has_weather_data = true` |
+
+- **Recharts visualisations** — three bar charts using `recharts@3.x`:
+  - **Lap count chart** — horizontal bar chart of total laps per driver; bars coloured red for favourites, grey for others
+  - **Fastest lap gap chart** — horizontal bar chart showing each driver's gap to the session fastest lap in seconds; the fastest driver's bar is shown at reduced opacity to make it visually distinct
+  - **Compound usage chart** — vertical bar chart with compounds ordered `SOFT → MEDIUM → HARD → INTERMEDIATE → WET`; coloured per compound
+  - All charts use `ResponsiveContainer` and a custom dark-themed `ChartTooltip`
+
+- **Driver comparison tool:** select any two car numbers from dropdowns, click **Compare**, and see a side-by-side card with fastest lap, average lap, deltas (negative = driver A faster), and per-driver stint tables with compound and lap range; shows an empty state if fewer than two drivers have lap data
+
+- **Three-level compound empty state:**
+  - `!has_stint_data` → "No stint/tire data has been synced for this session yet."
+  - `has_stint_data && !has_compound_pace` → "Compound pace requires stints with lap ranges stored. The stints for this session were synced without `lap_start` / `lap_end`, so per-compound averages cannot be computed."
+  - Both flags true but no data → "No compound pace data available."
+
+- **Navigation links:**
+  - Calendar page — past session rows now show three stacked links: **Dashboard →**, **Strategy →**, **Analytics →** (purple hover)
+  - Session Dashboard nav bar — **Analytics →** link added alongside Strategy and Raw data links
+  - Strategy Dashboard nav bar — **Analytics →** link added alongside Session dashboard link
+
+**AI context improvements:**
+
+- `app/services/ai_context.py` — added `_ai_analytics_lines()` function, called inside `_session_block()` before the strategy block. Produces a compact analytics block with token safeguards:
+  - Returns `[]` when `has_lap_data` is false (avoids a redundant missing-data message since `_session_block()` already emits `Missing: no_lap_data`)
+  - Emits session fastest and average, per-driver fastest and average (capped at `_AI_MAX_ANALYTICS_DRIVERS = 20`)
+  - Compound pace averages with sample lap counts (when `has_compound_pace = true`)
+  - Safety car laps (up to 8) and red flag laps (up to 5) with a caveat that those lap times are not race pace
+  - Wrapped in `try/except` — any analytics service failure returns `[]` silently
+
+- `app/services/ai_service.py` — system prompt updated with an ANALYTICS section:
+  - "Who was fastest?" → session fastest lap and per-driver pace list
+  - "What was X's lap time / average pace?" → per-driver pace entries
+  - "Which compound was fastest?" → compound pace averages
+  - "Were there safety cars?" → safety car laps list
+  - If `no_lap_data`: say "GridPulse does not have enough synced lap data to answer that yet."
+  - If team mapping is unavailable: say "GridPulse does not have reliable driver-to-team mapping for this session."
+  - Updated WHAT GRIDPULSE DOES NOT HAVE: replaced "individual lap times per driver" with "full per-lap time sequences (only fastest, average, and sector best times are available per driver via the Analytics section)"
+
+**Token budget safeguards (updated):**
+
+| Cap | Value | Purpose |
+|---|---|---|
+| `_MAX_SYNCED_SESSIONS` | 2 | Session blocks included in AI context |
+| `_AI_MAX_RC` | 15 | RC messages per session |
+| `_AI_MAX_DRIVER_LAPS` | 10 | Per-driver rows in qualifying/FP lap table |
+| `_AI_MAX_STRATEGY_DRIVERS` | 20 | Per-driver strategy rows per session |
+| `_AI_MAX_INSIGHTS` | 4 | Rule-based insight sentences per session |
+| `_AI_MAX_ANALYTICS_DRIVERS` | 20 | Per-driver analytics rows per session |
+
+**What the AI can answer from analytics data:**
+- Session fastest lap and who set it, with the time in seconds
+- Per-driver fastest and average pace for any driver in a synced session
+- Compound pace averages with sample lap counts ("SOFT averaged 89.1s across 45 laps")
+- Whether there were safety car or red flag laps and which laps they fell on (with a caveat that lap times on those laps are not race pace)
+
+**What the AI still cannot answer if data is missing:**
+- Anything flagged `no_lap_data` — the AI says "GridPulse does not have enough synced lap data to answer that yet" and does not guess
+- Full per-lap time sequences — only fastest and average times per driver are stored in the analytics summary
+- Compound pace if stints lack `lap_start` / `lap_end` ranges — the AI notes that stints were synced without lap ranges
+- Official sector bests from timing towers — sector data is from stored OpenF1 lap rows only
+- Qualifying times, official race pace, or any live timing data
+
+**How to sync data before using the Analytics Dashboard:**
+
+The Analytics Dashboard requires OpenF1 data for the session to be synced first. Without it, all sections show empty states with `has_* = false`.
+
+1. Find the OpenF1 session key:
+   ```bash
+   python scripts/sync_openf1_session.py --list 2026
+   ```
+2. Sync the session:
+   ```bash
+   python scripts/sync_openf1_session.py --session-key <key>
+   ```
+3. Open the Calendar page and click **Analytics →** on any past session row, or navigate directly to `/sessions/:id/analytics`.
+
+**What is not included in Phase 14:**
+- Live timing of any kind — all data is from stored OpenF1 historical snapshots
+- WebSockets, Redis, or any real-time transport
+- Track map or moving driver position dots
+- ML predictions or strategy recommendations
+- Full per-lap time sequences per driver — only fastest and average are computed
+- Official sector best times from timing towers
+- Qualifying vs race pace comparison — requires a qualifying session to be synced and linked to the same race
+- Tyre degradation curves — requires per-lap compound data not currently tracked
+- Telemetry overlays (speed, throttle, brake, GPS position) — planned for a FastF1 integration phase
+
 ---
-
-### Phase 8 — Favourite Drivers, Favourite Teams, and Personalised Dashboard (complete)
-
-- `favorite_drivers` table — stores one row per `(user_id, driver_id)` pair; unique constraint `uq_favorite_driver_user` prevents duplicate favourites
-- `favorite_teams` table — same pattern with `(user_id, team_id)` and unique constraint `uq_favorite_team_user`
-- `FavoriteDriver` and `FavoriteTeam` SQLAlchemy models with relationships to `User`, `Driver`, and `Team`
-- Nested Pydantic schemas: `FavoriteDriverResponse` embeds a full `FavoriteDriverInfo` (including the driver's team as `FavoriteTeamInfo`); `FavoriteTeamResponse` embeds `FavoriteTeamInfo`
-- `GET /me/favorites/drivers` — returns the current user's favourite drivers, ordered by when they were added (protected)
-- `POST /me/favorites/drivers/{driver_id}` — favourites a driver; returns `404` if the driver does not exist, `409` if already favourited (protected)
-- `DELETE /me/favorites/drivers/{driver_id}` — removes a favourite driver; returns `404` if not in the user's list (protected)
-- `GET /me/favorites/teams` — returns the current user's favourite teams, ordered by when they were added (protected)
-- `POST /me/favorites/teams/{team_id}` — favourites a team; returns `404` if the team does not exist, `409` if already favourited (protected)
-- `DELETE /me/favorites/teams/{team_id}` — removes a favourite team; returns `404` if not in the user's list (protected)
-- `GET /me/dashboard` — returns a personalised summary in one request: user profile, favourite drivers (with nested team info), favourite teams, next 5 upcoming sessions, next 5 upcoming reminders, 5 most recent notifications (protected)
-- Frontend favourite API functions: `getFavoriteDrivers`, `addFavoriteDriver`, `removeFavoriteDriver`, `getFavoriteTeams`, `addFavoriteTeam`, `removeFavoriteTeam`, `getDashboard`
-- Driver Detail page — star button appears for logged-in users; initial state loaded from `GET /me/favorites/drivers` on mount; toggles between ☆ Add to Favourites and ★ Favourited; logged-out users see a styled "Log in to favourite" prompt that matches the button shape
-- Teams page — each team card has an individual star button; initial state is pre-loaded from `GET /me/favorites/teams` on page load; card border turns red when favourited; logged-out users see a "Log in to favourite" prompt per card
-- Dashboard page (`/dashboard`) — protected route; shows six sections: Welcome heading, Favourite Drivers (with driver number and team, links to driver detail pages), Favourite Teams, Upcoming Sessions (colour-coded by session type), Upcoming Reminders, and Recent Notifications (unread highlighted in red)
-- Dashboard link added to the navbar — visible only when logged in
-- All Dashboard sections show informative empty states with dashed-border cards and action links pointing to the relevant page (Drivers, Teams, Calendar) — not blank areas
-- All session and reminder times display in the user's local browser timezone, not hard-coded UTC
-- `scripts/migrate_create_favorites_tables.py` — idempotent migration to add `favorite_drivers` and `favorite_teams` to an existing database; fresh databases use `create_tables.py` directly
 
 ---
 
@@ -572,6 +715,7 @@ The Strategy Dashboard requires OpenF1 data for the session to be synced first. 
 | Frontend | React + Vite + TypeScript |
 | Styling | Tailwind CSS v4 |
 | Routing | React Router v6 |
+| Charts | Recharts |
 
 ---
 
@@ -654,7 +798,8 @@ gridpulse/
 │   │   ├── race_control_message.py  # RaceControlMessageResponse (Phase 11)
 │   │   ├── weather_sample.py     # WeatherSampleResponse (Phase 11)
 │   │   ├── session_dashboard.py  # SessionDashboardResponse and all nested schemas (Phase 12)
-│   │   └── strategy_dashboard.py # StrategyDashboardResponse and nested schemas; from_summary() converter (Phase 13)
+│   │   ├── strategy_dashboard.py # StrategyDashboardResponse and nested schemas; from_summary() converter (Phase 13)
+│   │   └── analytics.py          # SessionAnalyticsResponse, DriverComparisonResponse, AnalyticsTireSummary and nested schemas (Phase 14)
 │   ├── routes/
 │   │   ├── auth.py               # POST /auth/signup, POST /auth/login
 │   │   ├── google_auth.py        # GET /auth/google/start, GET /auth/google/callback
@@ -669,7 +814,8 @@ gridpulse/
 │   │   ├── sessions.py           # GET /sessions/upcoming, /synced, /races/{id}/sessions, /sessions/{id}, dashboard + strategy endpoints (Phase 7.5/11/12/13)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
 │   │   ├── dashboard.py          # GET /me/dashboard (Phase 8)
-│   │   └── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
+│   │   ├── ai.py                 # POST /ai/explain, GET /ai/history, GET /ai/usage (Phase 10)
+│   │   └── analytics.py          # GET /analytics/sessions/{id}, /compare, /tires (Phase 14)
 │   ├── services/
 │   │   ├── f1_api_client.py      # HTTP client for Jolpica API
 │   │   ├── data_ingestion.py     # maps API data into SQLAlchemy models
@@ -681,7 +827,8 @@ gridpulse/
 │   │   ├── openf1_client.py      # HTTP client for OpenF1 API — fetch_laps, fetch_stints, fetch_race_control, fetch_weather, etc. (Phase 11)
 │   │   ├── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
 │   │   ├── session_dashboard.py  # build_session_summary() — single source of truth for dashboard data (Phase 12)
-│   │   └── strategy_dashboard.py # build_strategy_summary() — compound usage, pit windows, insights; used by endpoint + AI context (Phase 13)
+│   │   ├── strategy_dashboard.py # build_strategy_summary() — compound usage, pit windows, insights; used by endpoint + AI context (Phase 13)
+│   │   └── analytics_service.py  # build_session_analytics(), compare_drivers() — pace, compound, teammate comparisons; used by endpoint + AI context (Phase 14)
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
@@ -1001,6 +1148,9 @@ Google sign-in requires a one-time manual setup in Google Cloud Console.
 | GET | `/sessions/{session_id}/dashboard` | Structured dashboard summary — lap stats, derived finishing order, tyre strategy, race control, weather; optional Bearer token for favourite-driver highlighting |
 | GET | `/sessions/{session_id}/strategy` | Strategy dashboard — compound usage, per-driver stint sequences, pit windows, strategy-relevant RC events, weather context, rule-based insights; optional Bearer token for favourite-driver highlighting |
 | GET | `/sessions/synced` | All sessions linked to an OpenF1 session key, ordered by start time descending |
+| GET | `/analytics/sessions/{session_id}` | Full analytics summary — session fastest and average pace, per-driver fastest and average lap, compound averages, teammate comparisons, race context, weather; optional Bearer token for `is_favourite` highlighting |
+| GET | `/analytics/sessions/{session_id}/compare` | Side-by-side driver comparison; `?driver1=4&driver2=1` query params; `404` with valid car numbers if a driver is not found |
+| GET | `/analytics/sessions/{session_id}/tires` | Tire analytics only — compound pace averages and per-stint pace |
 
 ### Authentication endpoints
 
@@ -2044,6 +2194,105 @@ After syncing a session, go to `http://localhost:5173/ai` and try:
 
 ---
 
+## Testing the Analytics Dashboard
+
+### Prerequisites
+
+The Analytics Dashboard only shows data for sessions that have been synced via `sync_openf1_session.py`. Sync at least one race session before testing (see the **OpenF1 Session Sync** section above for the `--list` and `--session-key` steps).
+
+### Test the backend endpoints
+
+```bash
+uvicorn app.main:app --reload
+```
+
+```bash
+# Replace 5 with the session_id of a synced session
+curl http://localhost:8000/analytics/sessions/5 | python3 -m json.tool
+
+# Tire analytics only
+curl http://localhost:8000/analytics/sessions/5/tires | python3 -m json.tool
+
+# Driver comparison (car numbers 4 and 1)
+curl "http://localhost:8000/analytics/sessions/5/compare?driver1=4&driver2=1" | python3 -m json.tool
+```
+
+Expected for a synced session: a JSON object with `session_id`, `has_lap_data: true`, `session_fastest_lap`, `session_fastest_driver`, and populated `driver_pace`, `tire_analytics`, `teammate_comparisons`, `race_context`, and `weather` fields.
+
+For an unsynced session all `has_*` flags will be `false` and data sections will be empty:
+```bash
+curl http://localhost:8000/analytics/sessions/1 | python3 -m json.tool
+# Expect: is_synced: false, has_lap_data: false, driver_pace: []
+```
+
+For an invalid car number in the compare endpoint:
+```bash
+curl "http://localhost:8000/analytics/sessions/5/compare?driver1=4&driver2=99" | python3 -m json.tool
+# Expect: 404 with a "valid_car_numbers" list in the detail
+```
+
+### Test favourite-driver highlighting
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"yourpass"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl http://localhost:8000/analytics/sessions/5 \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | grep is_favourite
+```
+
+Expected: `"is_favourite": true` for any driver the user has favourited.
+
+### Test the frontend Analytics Dashboard
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Go to `http://localhost:5173/calendar`
+3. Expand any past race — each session row shows **Dashboard →**, **Strategy →**, and **Analytics →** links
+4. Click **Analytics →** — you are taken to `/sessions/:id/analytics`
+5. If the session has not been synced: every section shows its specific empty-state message and a footnote about OpenF1 sync dependency is visible
+6. If the session has been synced: all sections fill in with real data
+
+### Verify each analytics section
+
+| Section | What to check |
+|---|---|
+| Session pace | Session fastest lap matches `MIN(lap_duration)` from psql on the `laps` table (excluding pit-out laps) |
+| Driver pace table | Per-driver fastest laps are ordered fastest first; average only appears for drivers with ≥3 timed laps |
+| Compound pace | Average times match the compounds in the `stints` table; only appears when stints have `lap_start` / `lap_end` set |
+| Lap count chart | Bar lengths are proportional to total lap count; favourite driver bar is red |
+| Fastest lap gap chart | The session-fastest driver shows a near-zero bar; others show their gap in seconds |
+| Compound usage chart | Bars appear in SOFT → MEDIUM → HARD → INTERMEDIATE → WET order |
+| Teammate comparisons | Deltas are negative when driver A is faster; teams without both drivers having lap data are not shown |
+| Race control context | Safety car lap numbers match `race_control_messages` table rows with SAFETY CAR in the message |
+| Weather | Latest reading matches the most recent row in `weather_samples` for the session |
+
+### Test the driver comparison tool
+
+1. Open the Analytics page for a synced session
+2. Both car number dropdowns should be populated with drivers who have lap data
+3. Select two different drivers and click **Compare**
+4. A side-by-side card appears: fastest lap, average lap, delta (negative = left driver faster)
+5. Per-driver stint tables appear below the summary row
+6. Select the same driver in both dropdowns — the backend still returns a valid response (delta = 0)
+7. Before selecting any drivers, the Compare button is disabled
+
+### Test AI questions about analytics data
+
+After syncing a session, go to `http://localhost:5173/ai` and try:
+
+| Prompt | Expected behaviour |
+|---|---|
+| `Who was the fastest driver in the Bahrain race?` | Names the driver and gives the fastest lap time in seconds with an approximation note |
+| `What was Leclerc's average pace?` | Reads the per-driver average from context; qualifies as derived from stored laps |
+| `Which tyre compound was fastest?` | Gives compound averages from context if compound pace is available |
+| `Were there any safety cars?` | Lists the safety car laps from the analytics block |
+| `What was [driver]'s fastest lap?` | Gives the time if in context; says "GridPulse does not have enough synced lap data" if `no_lap_data` |
+| `What were all of Verstappen's lap times?` | Says full per-lap time sequences are not available — only fastest and average |
+
+---
+
 ## FastF1 — Future Integration Plan
 
 FastF1 is a Python library (not used in Phase 11) that provides data OpenF1 does not:
@@ -2078,14 +2327,14 @@ The following features are planned but not yet built:
 - Multi-turn conversation threading — each question is currently independent (single-turn Q&A)
 - Streaming responses (WebSocket or Server-Sent Events)
 
-**Historical data (partial — Phase 13 complete, gaps remaining):**
+**Historical data (partial — Phase 14 complete, gaps remaining):**
 - Official race classifications — the dashboard finishing order is derived from lap timing; post-race penalties and DSQs are not reflected
 - Qualifying results and grid positions — no `qualifying_results` table yet
-- Lap time charts, pace trend charts, driver comparison visualisations — data is stored but no chart layer yet (Phase 14)
 - Automatic session sync — the sync script must still be run manually
 - FastF1 telemetry (speed traces, throttle, GPS position) — planned for analytics phase
 - Pit stop duration data — pit windows are derived from stint transitions, not official timing
-- Tyre degradation trend analysis — requires per-lap compound tracking not currently stored
+- Tyre degradation trend analysis and full per-lap time sequences per driver — only fastest and average lap times are currently computed
+- Qualifying vs race pace comparison — requires syncing and linking a qualifying session to the same race
 
 **Notifications:**
 - Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
@@ -2150,8 +2399,11 @@ Structured per-session dashboard at `GET /sessions/{id}/dashboard` and `/session
 **Phase 13 — Strategy Dashboard** *(complete)*
 Dedicated strategy page at `GET /sessions/{id}/strategy` and `/sessions/:id/strategy`. Sections: compound usage cards, per-driver stint sequences with longest-stint highlighting, stop-count grouping, derived pit windows, strategy-relevant race control events with context notes, weather conditions. Rule-based insights derived from stored data — no ML. Favourite-driver cards sorted first. Navigation links added to Calendar and Session Dashboard. AI context updated with compact strategy summaries; system prompt updated with explicit strategy-grounding rules; token budget safeguards maintained.
 
-**Phase 14 — Advanced Analytics**
-Driver comparison, team comparison, pace trends, lap time charts, qualifying vs race pace, teammate delta, and analytics visualisations.
+**Phase 14 — Advanced Analytics** *(complete)*
+Analytics page at `GET /analytics/sessions/{id}` and `/sessions/:id/analytics`. Sections: session pace summary, per-driver fastest and average lap table, compound pace averages, teammate comparison deltas, safety car and red flag context, weather, and three Recharts bar charts (lap count, fastest lap gap, compound usage). Side-by-side driver comparison tool. Navigation links added to Calendar, Session Dashboard, and Strategy Dashboard. AI context updated with per-driver pace, compound averages, and SC/RF laps; analytics-aware system prompt with explicit missing-data rules; `_AI_MAX_ANALYTICS_DRIVERS = 20` token cap.
+
+**Phase 15 — Live Favourite Driver Alerts**
+Real-time or replay-based alerts for favourited drivers: gained/lost positions, pit events, compound changes, penalties, investigations, fastest lap, retirement, gap changes.
 
 **Phase 15 — Live Favourite Driver Alerts**
 Real-time or replay-based alerts for favourited drivers: gained/lost positions, pit events, compound changes, penalties, investigations, fastest lap, retirement, gap changes.
@@ -2160,7 +2412,7 @@ Real-time or replay-based alerts for favourited drivers: gained/lost positions, 
 Docker and Docker Compose setup, automated tests, CI/CD pipeline, and production-style deployment configuration.
 
 **Phase 17 — ML Prediction Layer**
-Machine learning models for podium prediction, pit window estimation, tyre degradation prediction, and race outcome simulation.
+Machine learning models for podium prediction, pit window estimation, and tyre degradation prediction.
 
 **Phase 18 — Mobile App**
 React Native / Expo mobile app consuming the same FastAPI backend.

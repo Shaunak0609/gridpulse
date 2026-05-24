@@ -233,9 +233,11 @@ function DriverPaceTable({ drivers }: { drivers: AnalyticsDriverSummary[] }) {
 
 function CompoundPaceSection({
   compounds,
+  hasStintData,
   hasCompoundPace,
 }: {
   compounds: AnalyticsCompoundUsage[]
+  hasStintData: boolean
   hasCompoundPace: boolean
 }) {
   const sorted = [
@@ -245,9 +247,11 @@ function CompoundPaceSection({
     ...compounds.filter(u => !COMPOUND_ORDER.includes(u.compound)),
   ]
 
-  const emptyMessage = hasCompoundPace
-    ? 'No compound pace data available.'
-    : 'Compound pace requires stints with lap ranges — not available for this session.'
+  const emptyMessage = !hasStintData
+    ? 'No stint/tire data has been synced for this session yet.'
+    : !hasCompoundPace
+      ? 'Compound pace requires stints with lap ranges — not available for this session.'
+      : 'No compound pace data available.'
 
   return (
     <SectionCard
@@ -311,9 +315,9 @@ function TeammateComparisonsSection({
   return (
     <SectionCard
       title="Teammate Battle"
-      badge={`${comparisons.length} team${comparisons.length !== 1 ? 's' : ''}`}
+      badge={comparisons.length > 0 ? `${comparisons.length} team${comparisons.length !== 1 ? 's' : ''}` : undefined}
       empty={comparisons.length === 0}
-      emptyMessage="Teammate comparisons require two drivers per team with timed lap data."
+      emptyMessage="Team analytics require reliable driver-to-team mapping for this session. If lap data is present but no comparisons appear, team assignment may be incomplete in GridPulse."
     >
       <div className="divide-y divide-gray-800/50">
         {comparisons.map(tc => {
@@ -671,11 +675,13 @@ function ChartsSection({
   drivers,
   compounds,
   hasLapData,
+  hasStintData,
   hasCompoundPace,
 }: {
   drivers: AnalyticsDriverSummary[]
   compounds: AnalyticsCompoundUsage[]
   hasLapData: boolean
+  hasStintData: boolean
   hasCompoundPace: boolean
 }) {
   return (
@@ -715,11 +721,15 @@ function ChartsSection({
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">
             Laps by Compound
           </p>
-          {hasCompoundPace ? (
+          {hasCompoundPace && compounds.length > 0 ? (
             <CompoundUsageChart compounds={compounds} />
           ) : (
             <p className="text-sm text-gray-600 text-center py-6">
-              Compound data requires stints with lap ranges — not available for this session.
+              {!hasStintData
+                ? 'No stint/tire data has been synced for this session yet.'
+                : !hasCompoundPace
+                  ? 'Compound chart requires stints with lap ranges — not available for this session.'
+                  : 'No compound data available.'}
             </p>
           )}
         </div>
@@ -933,7 +943,7 @@ function DriverComparisonSection({
       <div className="px-5 py-4">
         {drivers.length < 2 ? (
           <p className="text-sm text-gray-600 text-center py-4">
-            Lap data for at least two drivers is required to compare.
+            Not enough synced lap data to compare drivers in this session.
           </p>
         ) : (
           <>
@@ -1077,6 +1087,7 @@ export default function AnalyticsDashboardPage() {
     start_time,
     is_synced,
     has_lap_data,
+    has_stint_data,
     has_rc_data,
     has_weather_data,
     session_fastest_lap,
@@ -1178,6 +1189,7 @@ export default function AnalyticsDashboardPage() {
         drivers={driver_pace}
         compounds={compoundPace}
         hasLapData={has_lap_data}
+        hasStintData={has_stint_data}
         hasCompoundPace={hasCompoundPace}
       />
 
@@ -1196,6 +1208,7 @@ export default function AnalyticsDashboardPage() {
       {/* Compound pace */}
       <CompoundPaceSection
         compounds={compoundPace}
+        hasStintData={has_stint_data}
         hasCompoundPace={hasCompoundPace}
       />
 
