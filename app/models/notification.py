@@ -18,7 +18,9 @@ class Notification(Base):
 
     related_race_id = Column(Integer, ForeignKey("races.id"), nullable=True)
     related_driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=True)
+    related_session_id = Column(Integer, ForeignKey("sessions.id"), nullable=True)
 
     user = relationship("User", backref="notifications")
     related_race = relationship("Race", backref="notifications")
     related_driver = relationship("Driver", backref="notifications")
+    related_session = relationship("Session", backref="notifications")

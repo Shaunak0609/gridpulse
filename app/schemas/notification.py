@@ -20,5 +20,6 @@ class NotificationResponse(BaseModel):
     created_at: datetime
     related_race_id: int | None
     related_driver_id: int | None
+    related_session_id: int | None
 
     model_config = {"from_attributes": True}

@@ -6,7 +6,9 @@ from app.database.database import get_db
 from app.models.favorite_driver import FavoriteDriver
 from app.models.notification import Notification
 from app.models.user import User
+from app.schemas.alert import SessionAlertGenerationResult
 from app.schemas.notification import NotificationGenerationSummary, NotificationResponse
+from app.services.favorite_driver_alerts import generate_session_alerts
 from app.services.favorite_driver_notifications import (
     generate_standing_notifications,
     generate_wins_notifications,
@@ -105,3 +107,35 @@ def generate_favorite_driver_updates(
         notifications_created=standing["created"] + wins["created"],
         duplicates_skipped=standing["skipped_duplicate"] + wins["skipped_duplicate"],
     )
+
+
+@router.post(
+    "/generate-favorite-driver-alerts/{session_id}",
+    response_model=SessionAlertGenerationResult,
+    summary="[Dev] Generate favourite-driver alerts for a synced session",
+    description=(
+        "Development/manual endpoint. Detects favourite-driver events in a "
+        "specific synced OpenF1 session — fastest stored lap, tyre strategy, "
+        "race control mentions, and lap data notes — and creates in-app "
+        "notifications for any user who has favourited a driver with data in "
+        "that session. Duplicate alerts (same user, type, driver, and session) "
+        "are skipped automatically, so calling this endpoint more than once is "
+        "safe. Returns a per-alert-type breakdown of what was created and "
+        "skipped. The session must have been synced via "
+        "sync_openf1_session.py before alerts can be generated."
+    ),
+)
+def generate_favorite_driver_alerts(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    result = generate_session_alerts(session_id, db)
+
+    if "error" in result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result["error"],
+        )
+
+    return SessionAlertGenerationResult.model_validate(result)
