@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment — never bake secrets into the image
+.env
+.env.docker
+
+# Frontend — backend image does not need any of this
+frontend/
+
+# Git and editor files
+.git/
+.gitignore
+.claude/
+.DS_Store
+
+# Build artifacts
+dist/
