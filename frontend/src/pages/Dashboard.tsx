@@ -63,6 +63,65 @@ const SESSION_COLORS: Record<string, string> = {
   race: 'bg-red-500',
 }
 
+function driverAlertIcon(type: string): { color: string; badge: string; icon: JSX.Element } {
+  switch (type) {
+    case 'favorite_driver_fastest_lap':
+      return {
+        color: 'text-purple-400',
+        badge: 'Fastest lap',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+        ),
+      }
+    case 'favorite_driver_strategy':
+      return {
+        color: 'text-orange-400',
+        badge: 'Strategy',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="3.5" />
+          </svg>
+        ),
+      }
+    case 'favorite_driver_rc_mention':
+      return {
+        color: 'text-yellow-400',
+        badge: 'Race control',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 3v18" />
+            <path d="M4 3h14l-3.5 4.5L18 12H4" />
+          </svg>
+        ),
+      }
+    case 'favorite_driver_lap_comparison':
+      return {
+        color: 'text-slate-400',
+        badge: 'Lap note',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+        ),
+      }
+    default:
+      return {
+        color: 'text-amber-500',
+        badge: '',
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        ),
+      }
+  }
+}
+
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('en-GB', {
@@ -117,11 +176,18 @@ export default function Dashboard() {
 
   const { user, favorite_drivers, favorite_teams, upcoming_sessions, upcoming_reminders, recent_notifications } = data
 
-  const DRIVER_UPDATE_TYPES = new Set(['favorite_driver_standing', 'favorite_driver_wins'])
+  const DRIVER_UPDATE_TYPES = new Set([
+    'favorite_driver_standing',
+    'favorite_driver_wins',
+    'favorite_driver_fastest_lap',
+    'favorite_driver_strategy',
+    'favorite_driver_rc_mention',
+    'favorite_driver_lap_comparison',
+  ])
 
   const driverUpdates = recent_notifications
     .filter(n => DRIVER_UPDATE_TYPES.has(n.type))
-    .slice(0, 3)
+    .slice(0, 4)
   const otherNotifs = recent_notifications
     .filter(n => !DRIVER_UPDATE_TYPES.has(n.type))
     .slice(0, 3)
@@ -172,44 +238,45 @@ export default function Dashboard() {
         <SectionHeading title="Driver Updates" linkTo="/notifications" linkLabel="All notifications" />
         {driverUpdates.length === 0 ? (
           <EmptyState
-            message="No driver updates yet. Favourite a driver and updates will appear here when standings are available."
+            message="No driver updates yet. Favourite a driver and updates will appear here when standings or session alerts are available."
             linkTo="/drivers"
             linkLabel="Browse drivers"
           />
         ) : (
           <div className="space-y-2">
-            {driverUpdates.map(notif => (
-              <div
-                key={notif.id}
-                className={`border rounded-xl p-4 flex items-start gap-3 transition-colors ${
-                  notif.read
-                    ? 'bg-gray-900 border-gray-800 opacity-60'
-                    : 'bg-gray-900 border-amber-900/40'
-                }`}
-              >
-                <span className={`mt-0.5 shrink-0 ${notif.read ? 'text-gray-700' : 'text-amber-500'}`}>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-4 h-4"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                  </svg>
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-medium ${notif.read ? 'text-gray-400' : 'text-white'}`}>
-                    {notif.title}
-                  </p>
-                  {notif.message && (
-                    <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{notif.message}</p>
+            {driverUpdates.map(notif => {
+              const { color, badge, icon } = driverAlertIcon(notif.type)
+              return (
+                <div
+                  key={notif.id}
+                  className={`border rounded-xl p-4 flex items-start gap-3 transition-colors ${
+                    notif.read
+                      ? 'bg-gray-900 border-gray-800 opacity-60'
+                      : 'bg-gray-900 border-gray-800'
+                  }`}
+                >
+                  <span className={`mt-0.5 shrink-0 ${notif.read ? 'text-gray-700' : color}`}>
+                    {icon}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-medium ${notif.read ? 'text-gray-400' : 'text-white'}`}>
+                      {notif.title}
+                      {badge && !notif.read && (
+                        <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 border border-gray-700 px-1.5 py-0.5 rounded align-middle">
+                          {badge}
+                        </span>
+                      )}
+                    </p>
+                    {notif.message && (
+                      <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{notif.message}</p>
+                    )}
+                  </div>
+                  {!notif.read && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 shrink-0" />
                   )}
                 </div>
-                {!notif.read && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>

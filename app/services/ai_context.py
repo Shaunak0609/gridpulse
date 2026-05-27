@@ -25,6 +25,7 @@ _MAX_STANDINGS = 10
 _MAX_SESSIONS = 5
 _MAX_REMINDERS = 3
 _MAX_NOTIFICATIONS = 3
+_MAX_DRIVER_ALERTS = 5      # favourite-driver alert entries to include
 _MAX_SYNCED_SESSIONS = 2    # most-recent synced sessions to describe
 
 # AI-specific caps — tighter than the service-level caps to protect the
@@ -35,6 +36,16 @@ _AI_MAX_DRIVER_LAPS = 10    # per-driver lap rows for qualifying/FP sessions
 _AI_MAX_STRATEGY_DRIVERS = 20  # per-driver strategy rows in AI context
 _AI_MAX_INSIGHTS = 4            # rule-based insight sentences to include
 _AI_MAX_ANALYTICS_DRIVERS = 20 # per-driver pace rows in analytics context
+
+# Human-readable label and data source for each favourite-driver alert type.
+_ALERT_TYPE_META: dict[str, tuple[str, str]] = {
+    "favorite_driver_fastest_lap":    ("Fastest lap in session",        "lap data"),
+    "favorite_driver_strategy":       ("Tyre strategy summary",         "stint data"),
+    "favorite_driver_rc_mention":     ("Race control mention",          "race control data"),
+    "favorite_driver_lap_comparison": ("Lap comparison note",           "lap data"),
+    "favorite_driver_standing":       ("Championship standings update", "standings data"),
+    "favorite_driver_wins":           ("Race wins update",              "standings data"),
+}
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -335,6 +346,57 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
     return lines
 
 
+# ─── Favourite-driver alert section ──────────────────────────────────────────
+
+def _build_driver_alerts_section(user: User, db: Session) -> list[str]:
+    """
+    Return compact lines for the user's most recent favourite-driver alerts.
+
+    Each entry includes the alert type label, driver name, session label, and
+    the data source that triggered it. The pre-computed message is included so
+    the AI can answer questions about detected events without re-querying the DB.
+
+    Capped at _MAX_DRIVER_ALERTS entries to stay within token limits.
+    """
+    alerts = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == user.id,
+            Notification.type.like("favorite_driver_%"),
+        )
+        .order_by(Notification.created_at.desc())
+        .limit(_MAX_DRIVER_ALERTS)
+        .all()
+    )
+    if not alerts:
+        return ["  (no favourite-driver alerts generated yet)"]
+
+    lines: list[str] = []
+    for n in alerts:
+        label, source = _ALERT_TYPE_META.get(n.type, (n.type, "unknown"))
+
+        driver_name = (
+            n.related_driver.full_name if n.related_driver else "unknown driver"
+        )
+        session_label = "not linked to a specific session"
+        if n.related_session:
+            race_name = (
+                n.related_session.race.name
+                if n.related_session.race
+                else "Unknown Race"
+            )
+            session_label = f"{race_name} {n.related_session.session_name}"
+
+        status = "unread" if not n.read else "read"
+        lines.append(
+            f"  [{label}] {driver_name} | {session_label} | source: {source} | {status}"
+        )
+        if n.message:
+            lines.append(f"    {n.message}")
+
+    return lines
+
+
 # ─── Driver reference table ───────────────────────────────────────────────────
 
 def _build_driver_reference(db: Session) -> list[str]:
@@ -460,10 +522,15 @@ def build_context(user: User, db: Session) -> str:
     ]
     sections.append(_section("Upcoming Reminders", reminder_lines))
 
-    # ── Recent notifications ──────────────────────────────────────────────────
+    # ── Recent notifications (non-driver alerts only) ─────────────────────────
+    # Favourite-driver alerts have their own dedicated section below — this
+    # section covers other notification types such as reminder_created.
     recent_notifications = (
         db.query(Notification)
-        .filter(Notification.user_id == user.id)
+        .filter(
+            Notification.user_id == user.id,
+            ~Notification.type.like("favorite_driver_%"),
+        )
         .order_by(Notification.created_at.desc())
         .limit(_MAX_NOTIFICATIONS)
         .all()
@@ -473,6 +540,13 @@ def build_context(user: User, db: Session) -> str:
         for n in recent_notifications
     ]
     sections.append(_section("Recent Notifications", notif_lines))
+
+    # ── Favourite-driver alerts ───────────────────────────────────────────────
+    alert_lines = _build_driver_alerts_section(user, db)
+    sections.append(_section(
+        f"Favourite-Driver Alerts (last {_MAX_DRIVER_ALERTS}, most recent first)",
+        alert_lines,
+    ))
 
     # ── Driver number reference ───────────────────────────────────────────────
     ref_lines = _build_driver_reference(db)

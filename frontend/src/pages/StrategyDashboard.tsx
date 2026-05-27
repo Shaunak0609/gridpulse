@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getSessionStrategy } from '../services/api'
+import { getSessionStrategy, getNotifications } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type {
   StrategyDashboard,
@@ -9,6 +9,7 @@ import type {
   StrategyPitWindow,
   StrategyRaceControlContext,
   StrategyWeatherContext,
+  Notification,
 } from '../types'
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -637,6 +638,7 @@ export default function StrategyDashboardPage() {
   const [strategy, setStrategy] = useState<StrategyDashboard | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [strategyAlerts, setStrategyAlerts] = useState<Notification[]>([])
 
   // Wait for auth to resolve before fetching so the token state is final.
   useEffect(() => {
@@ -647,6 +649,15 @@ export default function StrategyDashboardPage() {
       .then(setStrategy)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
+  }, [sessionId, token, authLoading])
+
+  useEffect(() => {
+    if (authLoading || !token || !sessionId) return
+    getNotifications(token)
+      .then(all => setStrategyAlerts(
+        all.filter(n => n.related_session_id === sessionId && n.type === 'favorite_driver_strategy')
+      ))
+      .catch(() => {})
   }, [sessionId, token, authLoading])
 
   if (loading || authLoading) {
@@ -766,6 +777,41 @@ export default function StrategyDashboardPage() {
             This session was synced but no stint or compound data was returned by OpenF1.
             Strategy sections below will show empty states.
           </p>
+        </div>
+      )}
+
+      {/* Favourite-driver strategy alerts for this session */}
+      {strategyAlerts.length > 0 && (
+        <div className="bg-gray-900 border border-orange-900/40 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+            <h2 className="text-sm font-semibold text-white">Your Strategy Alerts</h2>
+            <Link to="/notifications" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+              View all →
+            </Link>
+          </div>
+          <div>
+            {strategyAlerts.slice(0, 3).map(alert => (
+              <div
+                key={alert.id}
+                className={`flex items-start gap-3 px-5 py-3 border-b border-gray-800/50 last:border-0 ${alert.read ? 'opacity-50' : ''}`}
+              >
+                <span className={`mt-0.5 shrink-0 ${alert.read ? 'text-gray-700' : 'text-orange-400'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="12" cy="12" r="9" />
+                    <circle cx="12" cy="12" r="3.5" />
+                  </svg>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-medium ${alert.read ? 'text-gray-400' : 'text-white'}`}>
+                    {alert.title}
+                  </p>
+                  {alert.message && (
+                    <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{alert.message}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

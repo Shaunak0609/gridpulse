@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 14
+## Current Status — Phase 15
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -689,6 +689,106 @@ The Analytics Dashboard requires OpenF1 data for the session to be synced first.
 - Tyre degradation curves — requires per-lap compound data not currently tracked
 - Telemetry overlays (speed, throttle, brake, GPS position) — planned for a FastF1 integration phase
 
+### Phase 15 — Sync-Based Favourite Driver Session Alerts (complete)
+
+Phase 15 adds per-session alert detection for favourited drivers. **These are not live alerts** — they are generated from stored OpenF1 historical data after a session is synced. The system reads lap, stint, and race control records to detect events involving a user's favourited drivers, then creates in-app notifications (and optional emails) for each affected user.
+
+**What Phase 15 added:**
+
+- `app/services/favorite_driver_alerts.py` — alert detection service. Four independent detectors run per driver per session:
+  - `_detect_fastest_lap` — fires when the driver holds the session's `MIN(lap_duration)` (pit-out laps excluded); uses a 0.001 s tolerance for floating-point ties
+  - `_detect_strategy` — fires when any stint record exists for the driver; summarises compound sequence, stop count, and longest stint
+  - `_detect_rc_mention` — fires when any `race_control_messages` row has `driver_number` matching the driver's car number (structured column only — no text search)
+  - `_detect_lap_comparison` — fires only for race/sprint sessions when the driver's `MAX(lap_number)` is ≥ 4 less than the session maximum; uses cautious language and explicitly states no official retirement data is stored
+
+- `app/models/notification.py` updated — `related_session_id` nullable FK (`INTEGER REFERENCES sessions(id) ON DELETE SET NULL`) added; `related_session` relationship added
+
+- `app/schemas/notification.py` updated — `related_session_id: int | None` added to `NotificationResponse`
+
+- `app/schemas/alert.py` — two new Pydantic schemas: `AlertTypeResult` (created, skipped, emails_sent, emails_failed per type) and `SessionAlertGenerationResult` (session identity, is_synced flag, per-type breakdown, totals)
+
+- `scripts/migrate_add_notification_session_id.py` — idempotent migration; adds `related_session_id` to an existing `notifications` table using `ADD COLUMN IF NOT EXISTS`
+
+- `scripts/generate_favorite_driver_alerts.py` — CLI alert generation script:
+
+  ```bash
+  # List all synced sessions with their GridPulse session IDs
+  python scripts/generate_favorite_driver_alerts.py --list
+
+  # Generate alerts for one session
+  python scripts/generate_favorite_driver_alerts.py --session-id 5
+  ```
+
+  Output shows per-type created/skipped/email counts and a psql tip when all alerts already exist.
+
+- `POST /notifications/generate-favorite-driver-alerts/{session_id}` — protected development endpoint; requires a valid Bearer token; runs all four detectors for the session and returns a `SessionAlertGenerationResult` JSON response; returns `404` if the session does not exist or has not been synced
+
+- Email delivery — after each new alert notification is committed, an email is sent if the user has both `email_notifications_enabled` and `favorite_driver_email_alerts_enabled` set to `true`; the notification row is always saved first so in-app delivery is never lost even if the email call fails
+
+- Frontend Notifications page (`/notifications`) — new type-specific icons and colour-coded badges for all notification types; session alert types receive distinct visual treatment:
+
+  | Type | Icon | Badge colour |
+  |---|---|---|
+  | `favorite_driver_fastest_lap` | Bolt / lightning | Purple |
+  | `favorite_driver_strategy` | Tyre (concentric circles) | Orange |
+  | `favorite_driver_rc_mention` | Flag | Yellow |
+  | `favorite_driver_lap_comparison` | Warning triangle | Slate |
+  | `favorite_driver_standing` / `wins` | Filled star | Amber |
+  | `reminder_created` | Bell | Blue |
+
+- Frontend Dashboard page — "Driver Updates" section expanded from 2 to all 6 `favorite_driver_*` types; type-appropriate icons and small type badge labels added per card; slice increased to 4 items
+
+- Frontend Session Dashboard (`/sessions/:id/dashboard`) — compact "Your Driver Alerts" panel (max 3 entries, link to `/notifications`) fetches notifications from the API and filters to `related_session_id === sessionId` and `type.startsWith('favorite_driver_')`; fails silently so page still works when unauthenticated or when no alerts exist
+
+- Frontend Strategy Dashboard (`/sessions/:id/strategy`) — compact "Your Strategy Alerts" panel filters to `type === 'favorite_driver_strategy'` for the session; rendered with orange tire icon; positioned after the no-stint-data notice and before the insights section
+
+- AI context update (`ai_context.py`) — new "Favourite-Driver Alerts" section (up to `_MAX_DRIVER_ALERTS = 5` entries, most recent first) injected before the driver number reference. Each entry includes: type label, driver name, session label, data source, read/unread status, and the full pre-computed alert message. The existing "Recent Notifications" section now excludes `favorite_driver_*` types so they are not double-counted.
+
+- AI system prompt update (`ai_service.py`) — new `== FAVOURITE-DRIVER ALERTS ==` section with explicit routing rules:
+  - Tyre change questions → only answer if a strategy alert or stint data exists
+  - Position gain/loss questions → state that GridPulse has no per-lap position column
+  - Investigation/penalty questions → only answer from rc_mention alert or RC messages (no text search)
+  - Retirement/DNF questions → quote the lap comparison alert; always add the no-official-classification disclaimer; never speculate on cause
+  - Missing data → name exactly which data source is absent
+
+**Supported alert types and their data sources:**
+
+| Alert type | Fires when | Source table | Supported for |
+|---|---|---|---|
+| `favorite_driver_fastest_lap` | Driver holds session `MIN(lap_duration)` | `laps` | All synced sessions |
+| `favorite_driver_strategy` | Any stint row exists for the driver | `stints` | All synced sessions |
+| `favorite_driver_rc_mention` | Any RC row has `driver_number` matching the driver | `race_control_messages` | All synced sessions |
+| `favorite_driver_lap_comparison` | Driver completed ≥4 fewer laps than session max | `laps` | Race and sprint sessions only |
+
+**What is intentionally NOT supported and why:**
+
+| Unsupported alert | Reason |
+|---|---|
+| Position gains or losses during a race | The `laps` table has no per-lap position column |
+| Official retirement or DNF confirmation | No `race_results` table exists; only lap count comparison is available |
+| Penalty confirmation via free-text search | RC message text is inconsistent across OpenF1 sessions; only the structured `driver_number` column is reliable |
+| Any live or real-time alerts | All data is from stored historical snapshots |
+
+**Dedup:** One notification per `(user_id, type, related_driver_id, related_session_id)`. Running the script or endpoint more than once for the same session is safe — existing alerts are counted as skipped, not duplicated.
+
+**When alerts are generated:**
+
+Alerts are not generated automatically. The recommended workflow is:
+
+1. Sync a session: `python scripts/sync_openf1_session.py --session-key <key>`
+2. Generate alerts: `python scripts/generate_favorite_driver_alerts.py --session-id <id>`
+
+Alternatively, trigger via the API endpoint after syncing.
+
+**What is not included in Phase 15:**
+- Automatic alert generation after sync — alerts must be generated manually
+- Live or real-time alerts of any kind
+- WebSockets, Redis, or push notifications
+- Position change alerts — no per-lap position data in OpenF1
+- Official retirement or DNF notifications — no `race_results` table
+- Track map or moving driver position visualisation
+- ML predictions of any kind
+
 ---
 
 ---
@@ -772,7 +872,7 @@ gridpulse/
 │   │   ├── standing.py
 │   │   ├── user.py               # User model (Phase 4)
 │   │   ├── reminder.py           # Reminder model — race_id + session_id (Phase 6/7.5)
-│   │   ├── notification.py       # Notification model (Phase 6)
+│   │   ├── notification.py       # Notification model; related_session_id FK added (Phase 6/15)
 │   │   ├── session.py            # Session model (Phase 7.5)
 │   │   ├── favorite_driver.py    # FavoriteDriver model — user/driver join table (Phase 8)
 │   │   ├── favorite_team.py      # FavoriteTeam model — user/team join table (Phase 8)
@@ -788,7 +888,8 @@ gridpulse/
 │   │   ├── standing.py
 │   │   ├── user.py               # UserCreate, UserLogin, UserResponse, Token
 │   │   ├── reminder.py           # ReminderCreate/Response with optional session_id (Phase 6/7.5)
-│   │   ├── notification.py       # NotificationResponse (Phase 6)
+│   │   ├── notification.py       # NotificationResponse; related_session_id added (Phase 6/15)
+│   │   ├── alert.py              # AlertTypeResult, SessionAlertGenerationResult (Phase 15)
 │   │   ├── session.py            # SessionCreate, SessionResponse, SessionDetailResponse (Phase 7.5/11)
 │   │   ├── favorite.py           # FavoriteDriverResponse, FavoriteTeamResponse + nested info schemas (Phase 8)
 │   │   ├── dashboard.py          # DashboardResponse — assembles all sections (Phase 8)
@@ -809,7 +910,7 @@ gridpulse/
 │   │   ├── calendar.py
 │   │   ├── standings.py
 │   │   ├── reminders.py          # POST/GET/DELETE /reminders (Phase 6/7.5)
-│   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoint (Phase 6/9.5)
+│   │   ├── notifications.py      # GET/PUT/DELETE /notifications + dev generate endpoints (Phase 6/9.5/15)
 │   │   ├── email.py              # POST /email/test, POST /email/send-due-reminders (Phase 7)
 │   │   ├── sessions.py           # GET /sessions/upcoming, /synced, /races/{id}/sessions, /sessions/{id}, dashboard + strategy endpoints (Phase 7.5/11/12/13)
 │   │   ├── favorites.py          # GET/POST/DELETE /me/favorites/drivers + /teams (Phase 8)
@@ -822,8 +923,9 @@ gridpulse/
 │   │   ├── email_service.py      # Resend wrapper (Phase 7)
 │   │   ├── reminder_email_service.py  # due-reminder delivery; session-aware email body (Phase 7/7.5)
 │   │   ├── favorite_driver_notifications.py  # standing + wins notification generators (Phase 9)
-│   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic; strategy-aware system prompt (Phase 10/13)
-│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; strategy context via _ai_strategy_lines() (Phase 10/11/12/13)
+│   │   ├── favorite_driver_alerts.py         # session alert detectors: fastest_lap, strategy, rc_mention, lap_comparison (Phase 15)
+│   │   ├── ai_service.py         # provider-isolated AI call layer; Groq + Anthropic; alert-aware system prompt (Phase 10/13/15)
+│   │   ├── ai_context.py         # builds plain-text GridPulse context for AI prompts; includes alert section (Phase 10/11/12/13/15)
 │   │   ├── openf1_client.py      # HTTP client for OpenF1 API — fetch_laps, fetch_stints, fetch_race_control, fetch_weather, etc. (Phase 11)
 │   │   ├── openf1_ingestion.py   # link_session, ingest_laps/stints/race_control/weather (Phase 11)
 │   │   ├── session_dashboard.py  # build_session_summary() — single source of truth for dashboard data (Phase 12)
@@ -847,7 +949,9 @@ gridpulse/
 │   ├── migrate_create_openf1_tables.py              # creates laps, stints, race_control_messages, weather_samples (Phase 11)
 │   ├── sync_openf1_session.py                       # CLI: --list YEAR or --session-key KEY to sync historical data (Phase 11)
 │   ├── send_due_reminder_emails.py                  # CLI script to send due reminder emails (Phase 7)
-│   └── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
+│   ├── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
+│   ├── migrate_add_notification_session_id.py       # adds related_session_id to notifications table (Phase 15)
+│   └── generate_favorite_driver_alerts.py           # CLI: --list synced sessions, --session-id ID to generate alerts (Phase 15)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
 └── requirements.txt
@@ -1186,6 +1290,7 @@ All notification endpoints require a valid JWT Bearer token.
 | PUT | `/notifications/{id}/read` | Yes — Bearer token | Mark a notification as read |
 | DELETE | `/notifications/{id}` | Yes — Bearer token | Delete a notification by ID |
 | POST | `/notifications/generate-favorite-driver-updates` | Yes — Bearer token | Development endpoint — manually trigger favourite-driver notification generation; returns a summary of created and skipped counts |
+| POST | `/notifications/generate-favorite-driver-alerts/{session_id}` | Yes — Bearer token | Development endpoint — generate session-level favourite-driver alerts (fastest lap, strategy, RC mention, lap comparison) for a synced session; returns a per-type breakdown; `404` if session not found or not synced |
 
 ### Favourite endpoints
 
@@ -2293,6 +2398,173 @@ After syncing a session, go to `http://localhost:5173/ai` and try:
 
 ---
 
+## Testing Favourite Driver Session Alerts
+
+### Prerequisites
+
+Session alerts require:
+1. At least one user account with a favourited driver
+2. A session synced from OpenF1 (`sync_openf1_session.py --session-key <key>`)
+3. The `related_session_id` migration applied (existing databases only)
+
+**Apply the migration (existing databases only):**
+
+```bash
+python scripts/migrate_add_notification_session_id.py
+```
+
+Fresh databases created with `create_tables.py` include the column automatically.
+
+### Generate alerts via the CLI script
+
+```bash
+# Step 1: find the GridPulse session_id of a synced session
+python scripts/generate_favorite_driver_alerts.py --list
+```
+
+Expected output:
+
+```
+ID     Session            Race                                     OpenF1 key
+--------------------------------------------------------------------------------
+5      Race               Bahrain Grand Prix                       9158
+
+Found 1 synced session(s).
+Use --session-id <ID> from the first column to generate alerts.
+```
+
+```bash
+# Step 2: generate alerts for that session
+python scripts/generate_favorite_driver_alerts.py --session-id 5
+```
+
+Expected output (first run, with a favourite driver in the session):
+
+```
+=== Favourite-driver session alerts — session_id=5 ===
+
+  Session       : Bahrain Grand Prix — Race (id=5)
+  Drivers with data checked : 1
+
+  [Fastest lap in session]
+    Created          : 1
+    Skipped (dup)    : 0
+    Emails sent      : 1
+
+  [Strategy summary]
+    Created          : 1
+    Skipped (dup)    : 0
+    Emails sent      : 1
+
+  [Race control mention]
+    Created          : 0
+    Skipped (dup)    : 0
+    Emails sent      : 0
+
+  [Lap data note]
+    Created          : 0
+    Skipped (dup)    : 0
+    Emails sent      : 0
+
+  Total created  : 2
+  Total skipped  : 0
+  Emails sent    : 2
+```
+
+Running the script again immediately:
+
+```
+  Total created  : 0
+  Total skipped  : 2
+  Tip: all alerts already exist for this session.
+  To regenerate, delete the existing notifications from psql:
+    DELETE FROM notifications
+    WHERE related_session_id = 5
+      AND type LIKE 'favorite_driver_%';
+```
+
+### Generate alerts via the API endpoint
+
+```bash
+uvicorn app.main:app --reload
+```
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"yourpass"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+curl -s -X POST http://localhost:8000/notifications/generate-favorite-driver-alerts/5 \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+Expected response (first run):
+
+```json
+{
+  "session_id": 5,
+  "session_name": "Race",
+  "race_name": "Bahrain Grand Prix",
+  "is_synced": true,
+  "favorite_drivers_checked": 1,
+  "alerts": {
+    "favorite_driver_fastest_lap": {"created": 1, "skipped": 0, "emails_sent": 1, "emails_failed": 0},
+    "favorite_driver_strategy":    {"created": 1, "skipped": 0, "emails_sent": 1, "emails_failed": 0},
+    "favorite_driver_rc_mention":  {"created": 0, "skipped": 0, "emails_sent": 0, "emails_failed": 0},
+    "favorite_driver_lap_comparison": {"created": 0, "skipped": 0, "emails_sent": 0, "emails_failed": 0}
+  },
+  "total_created": 2,
+  "total_skipped": 0,
+  "emails_sent": 2,
+  "emails_failed": 0
+}
+```
+
+### Test the Notifications page
+
+1. Start both servers: `uvicorn app.main:app --reload` and `cd frontend && npm run dev`
+2. Log in and go to `http://localhost:5173/notifications`
+3. Session alerts should appear with their type-specific icons and badges:
+   - Fastest lap → purple bolt icon + **Fastest lap** badge
+   - Strategy → orange tire icon + **Strategy** badge
+   - RC mention → yellow flag icon + **Race control** badge
+   - Lap comparison → slate triangle icon + **Lap note** badge
+4. Mark an alert as read — the icon dims and the row fades to 50% opacity
+5. Delete an alert — the row disappears and the unread count badge updates
+
+### Test the Dashboard alert summary
+
+1. Log in and go to `http://localhost:5173/dashboard`
+2. The **Driver Updates** section should now show session alert notifications alongside standing/wins notifications
+3. Each card should display the type-appropriate icon and a small type badge
+4. The section shows up to 4 items; click **All notifications →** to see the full list
+
+### Test session alert panels on session pages
+
+1. Navigate to `/sessions/:id/dashboard` for a synced session
+2. If the logged-in user has favourite-driver alerts for that session, a compact **"Your Driver Alerts"** panel appears above the Lap Summary
+3. Navigate to `/sessions/:id/strategy` for the same session
+4. If a strategy alert exists, a compact **"Your Strategy Alerts"** panel appears above the Strategy Insights section with an orange tire icon
+5. Both panels link to `/notifications` — click to view the full alert with the Mark read and Delete options
+6. Log out and reload the same pages — the alert panels are hidden (alerts are user-specific)
+
+### Test AI questions about session alerts
+
+After generating alerts, go to `http://localhost:5173/ai` and try:
+
+| Prompt | Expected behaviour |
+|---|---|
+| `What alerts do I have?` | Lists entries from the Favourite-Driver Alerts section in context |
+| `Did my favourite driver set the fastest lap?` | Confirms or denies based on the fastest lap alert; gives the stored lap time |
+| `What tyres did my favourite driver run?` | Reads the strategy alert message (compound sequence and stop count) |
+| `Was my favourite driver mentioned in race control?` | Confirms from the RC mention alert if it exists; says data is not available if not |
+| `Did my favourite driver retire from the race?` | Quotes the lap comparison alert (laps completed vs max); adds the no-official-classification disclaimer |
+| `How many positions did my favourite driver gain?` | States that GridPulse has no per-lap position column; offers the derived finishing order if available |
+| `What was my favourite driver's pit stop time?` | Says official pit stop durations are not stored in GridPulse |
+
+---
+
 ## FastF1 — Future Integration Plan
 
 FastF1 is a Python library (not used in Phase 11) that provides data OpenF1 does not:
@@ -2336,10 +2608,13 @@ The following features are planned but not yet built:
 - Tyre degradation trend analysis and full per-lap time sequences per driver — only fastest and average lap times are currently computed
 - Qualifying vs race pace comparison — requires syncing and linking a qualifying session to the same race
 
-**Notifications:**
-- Per-race finish position notifications — requires a `race_results` table; no race result data is ingested yet
+**Notifications and alerts:**
+- Automatic alert generation after OpenF1 sync — alerts must still be generated manually via `scripts/generate_favorite_driver_alerts.py` or the dev endpoint
+- Position change alerts (gained/lost positions during a race) — the `laps` table has no per-lap position column
+- Official retirement or DNF notifications — requires a `race_results` table; only lap count comparison is currently available
 - Per-qualifying position notifications — requires a `qualifying_results` table
 - Push notifications
+- The following alert types are explicitly not supported because the required data does not exist: penalty confirmation via text search, official race classifications, grid positions
 
 **Data and sync:**
 - Scheduled or automatic data sync — notification generation runs inside the sync script, but the sync itself must still be triggered manually or via a cron job
@@ -2402,11 +2677,8 @@ Dedicated strategy page at `GET /sessions/{id}/strategy` and `/sessions/:id/stra
 **Phase 14 — Advanced Analytics** *(complete)*
 Analytics page at `GET /analytics/sessions/{id}` and `/sessions/:id/analytics`. Sections: session pace summary, per-driver fastest and average lap table, compound pace averages, teammate comparison deltas, safety car and red flag context, weather, and three Recharts bar charts (lap count, fastest lap gap, compound usage). Side-by-side driver comparison tool. Navigation links added to Calendar, Session Dashboard, and Strategy Dashboard. AI context updated with per-driver pace, compound averages, and SC/RF laps; analytics-aware system prompt with explicit missing-data rules; `_AI_MAX_ANALYTICS_DRIVERS = 20` token cap.
 
-**Phase 15 — Live Favourite Driver Alerts**
-Real-time or replay-based alerts for favourited drivers: gained/lost positions, pit events, compound changes, penalties, investigations, fastest lap, retirement, gap changes.
-
-**Phase 15 — Live Favourite Driver Alerts**
-Real-time or replay-based alerts for favourited drivers: gained/lost positions, pit events, compound changes, penalties, investigations, fastest lap, retirement, gap changes.
+**Phase 15 — Sync-Based Favourite Driver Session Alerts** *(complete)*
+Per-session alert detection from stored OpenF1 data — not live timing. Four alert types supported: fastest stored lap, tyre strategy summary, race control mention (structured `driver_number` column), and lap comparison note (race/sprint sessions only). Manual CLI script and dev API endpoint for alert generation. Frontend Notifications page updated with type-specific icons and badges. Dashboard Driver Updates expanded to all six `favourite_driver_*` types. Compact alert panels added to Session Dashboard and Strategy Dashboard. AI context updated with alert section and explicit grounding rules for alert questions.
 
 **Phase 16 — Docker, Testing, CI/CD, and Deployment**
 Docker and Docker Compose setup, automated tests, CI/CD pipeline, and production-style deployment configuration.

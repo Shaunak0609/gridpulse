@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getSessionDashboard } from '../services/api'
+import { getSessionDashboard, getNotifications } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type {
   SessionDashboard,
@@ -9,6 +9,7 @@ import type {
   DashboardKeyEvent,
   DashboardRCMessage,
   DashboardLapStats,
+  Notification,
 } from '../types'
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -497,6 +498,7 @@ export default function SessionDashboardPage() {
   const [dashboard, setDashboard] = useState<SessionDashboard | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [sessionAlerts, setSessionAlerts] = useState<Notification[]>([])
 
   // Wait for auth to resolve before fetching so the correct token is used once.
   // This prevents a double-fetch (anonymous then authed) on initial page load.
@@ -508,6 +510,15 @@ export default function SessionDashboardPage() {
       .then(setDashboard)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
+  }, [sessionId, token, authLoading])
+
+  useEffect(() => {
+    if (authLoading || !token || !sessionId) return
+    getNotifications(token)
+      .then(all => setSessionAlerts(
+        all.filter(n => n.related_session_id === sessionId && n.type.startsWith('favorite_driver_'))
+      ))
+      .catch(() => {})
   }, [sessionId, token, authLoading])
 
   if (loading || authLoading) {
@@ -618,6 +629,36 @@ export default function SessionDashboardPage() {
             </code>{' '}
             to ingest lap, stint, race control, and weather data.
           </p>
+        </div>
+      )}
+
+      {/* Favourite-driver alerts for this session */}
+      {sessionAlerts.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+            <h2 className="text-sm font-semibold text-white">Your Driver Alerts</h2>
+            <Link to="/notifications" className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+              View all →
+            </Link>
+          </div>
+          <div>
+            {sessionAlerts.slice(0, 3).map(alert => (
+              <div
+                key={alert.id}
+                className={`flex items-start gap-3 px-5 py-3 border-b border-gray-800/50 last:border-0 ${alert.read ? 'opacity-50' : ''}`}
+              >
+                <span className="mt-0.5 shrink-0 text-red-500">★</span>
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-medium ${alert.read ? 'text-gray-400' : 'text-white'}`}>
+                    {alert.title}
+                  </p>
+                  {alert.message && (
+                    <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{alert.message}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

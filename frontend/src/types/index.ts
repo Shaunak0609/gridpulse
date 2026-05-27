@@ -154,6 +154,7 @@ export interface Notification {
   created_at: string
   related_race_id: number | null
   related_driver_id: number | null
+  related_session_id: number | null
 }
 
 export interface AIResponse {
