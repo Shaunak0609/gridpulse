@@ -12,6 +12,9 @@ htmlcov/
 .env
 .env.docker
 
+# Node (no root-level node_modules in this project, but exclude for safety)
+node_modules/
+
 # Frontend — backend image does not need any of this
 frontend/
 
