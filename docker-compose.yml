@@ -1,0 +1,71 @@
+# GridPulse — local development stack
+#
+# Starts three services: postgres, backend (FastAPI), frontend (nginx).
+# Run with:  docker compose up --build
+# Stop with: docker compose down
+# Wipe data: docker compose down -v   (removes the postgres volume too)
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gridpulse
+      POSTGRES_PASSWORD: gridpulse
+      POSTGRES_DB: gridpulse
+    volumes:
+      # Named volume — data persists across "docker compose down / up" cycles.
+      # Destroyed only by "docker compose down -v".
+      - postgres_data:/var/lib/postgresql/data
+    # Health check — backend waits for this before starting.
+    # pg_isready polls until postgres is actually accepting connections.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridpulse -d gridpulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Optional: expose 5432 so you can connect with TablePlus, psql, etc.
+    ports:
+      - "5432:5432"
+
+  # ── FastAPI backend ─────────────────────────────────────────────────────────
+  backend:
+    build: .                # Dockerfile at repo root
+    depends_on:
+      db:
+        condition: service_healthy   # wait until postgres passes its health check
+    # Load your real secrets (JWT key, API keys, etc.) from the local .env file.
+    env_file: .env
+    environment:
+      # These two override whatever is in .env because Docker Compose needs
+      # different values when running inside the container network:
+      #
+      # DATABASE_URL: "db" is the postgres service name — containers reach
+      #   each other by service name, not "localhost".
+      DATABASE_URL: postgresql://gridpulse:gridpulse@db:5432/gridpulse
+      #
+      # FRONTEND_URL: the browser reaches the frontend on port 3000 (nginx),
+      #   so CORS must allow that origin.
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "8000:8000"
+
+  # ── React frontend (nginx) ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: frontend      # build context is the frontend/ folder
+      dockerfile: Dockerfile
+      args:
+        # Vite bakes this URL into the JS bundle at build time.
+        # The browser (not the container) makes API calls, so "localhost:8000"
+        # refers to the host machine's exposed backend port — not the container.
+        VITE_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"    # nginx listens on 80 inside; exposed as 3000 on the host
+
+# ── Named volumes ───────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
