@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { signup } from '../services/api'
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { signup, API_BASE } from '../services/api'
 
 function GoogleIcon() {
   return (

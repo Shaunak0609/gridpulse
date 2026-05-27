@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+import { API_BASE } from '../services/api'
 
 export default function Login() {
   const { login, isAuthenticated, loading: authLoading } = useAuth()

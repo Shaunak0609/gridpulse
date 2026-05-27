@@ -1,6 +1,6 @@
 import type { AIHistoryItem, AIResponse, AIUsage, AnalyticsTireSummary, AuthUser, Dashboard, Driver, DriverComparisonAnalytics, DriverStanding, EmailPreferences, FavoriteDriver, FavoriteTeam, Lap, LoginPayload, Notification, NotificationPreferences, Race, RaceControlMessage, Reminder, ReminderCreate, Session, SessionAnalytics, SessionDashboard, SessionDetail, SignupPayload, Stint, StrategyDashboard, Team, TokenResponse, WeatherSample } from '../types'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+export const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

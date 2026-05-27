@@ -552,8 +552,6 @@ export default function SessionDashboardPage() {
     start_time,
     is_synced,
     has_lap_data,
-    has_stint_data,
-    has_rc_data,
     has_weather_data,
     lap_stats,
     finishing_order,
