@@ -1120,6 +1120,193 @@ The API will be available at `http://127.0.0.1:8000`.
 
 ---
 
+## Docker Local Development
+
+Docker Compose starts the full stack — PostgreSQL, the FastAPI backend, and the React frontend — in three containers with a single command. No local PostgreSQL installation, no virtual environment activation, no separate terminal tabs.
+
+### Prerequisites
+
+Install **Docker Desktop** from [docker.com](https://www.docker.com/products/docker-desktop/). Once installed, open it and wait for the whale icon in your menu bar to stop animating before running any `docker` commands.
+
+Verify Docker is running:
+
+```bash
+docker info
+```
+
+If this prints system information, Docker is up. If it says "cannot connect", Docker Desktop is not running yet.
+
+### Environment variables
+
+Docker Compose reads secrets from your local `.env` file. It automatically overrides two variables so the containers work correctly together:
+
+- `DATABASE_URL` is set to `postgresql://gridpulse:gridpulse@db:5432/gridpulse` — inside Docker, `db` is the hostname of the postgres container (not `localhost`)
+- `FRONTEND_URL` is set to `http://localhost:3000` — where the frontend container is served
+
+Everything else (`JWT_SECRET_KEY`, `AI_API_KEY`, `RESEND_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc.) is read from your `.env` file as-is. Make sure your `.env` has real values for these before starting.
+
+Copy the example file if you haven't already:
+
+```bash
+cp .env.example .env
+```
+
+Then fill in your credentials. The `DATABASE_URL` line in `.env` does not need to change — the compose file overrides it automatically.
+
+### Start the full stack
+
+```bash
+docker compose up --build
+```
+
+`--build` builds all three Docker images before starting. This takes a few minutes the first time (downloading base images, installing Python packages, running `npm ci` and `npm run build`). Subsequent starts are faster because Docker caches layers.
+
+You should see logs from all three services. When the backend is ready, you will see:
+
+```
+backend-1  | INFO:     Application startup complete.
+```
+
+**Verify each service:**
+
+```bash
+curl http://localhost:8000/health
+# → {"status":"ok"}
+```
+
+Open `http://localhost:3000` in your browser — the frontend should load.
+
+### Set up the database (first time only)
+
+After the stack is running, open a second terminal and run the setup scripts inside the backend container:
+
+```bash
+# Create all tables
+docker compose exec backend python scripts/create_tables.py
+
+# Seed real F1 data from Jolpica
+docker compose exec backend python scripts/sync_f1_data.py
+
+# Seed the session schedule
+docker compose exec backend python scripts/seed_sessions.py
+```
+
+`docker compose exec backend <command>` runs a command inside the already-running backend container. You do not need to activate a virtual environment — the container's Python already has all packages installed.
+
+### Run migration scripts inside Docker
+
+If you are setting up from an existing database export or adding new columns, run migration scripts the same way:
+
+```bash
+docker compose exec backend python scripts/migrate_add_openf1_session_fields.py
+docker compose exec backend python scripts/migrate_create_openf1_tables.py
+docker compose exec backend python scripts/migrate_add_notification_session_id.py
+# ... any other migrate_*.py scripts in order
+```
+
+### Sync OpenF1 historical session data inside Docker
+
+```bash
+# List available sessions
+docker compose exec backend python scripts/sync_openf1_session.py --list 2024
+
+# Sync a specific session
+docker compose exec backend python scripts/sync_openf1_session.py --session-key 9158
+
+# Generate favourite-driver alerts for a synced session
+docker compose exec backend python scripts/generate_favorite_driver_alerts.py --session-id 5
+```
+
+### Connect to the PostgreSQL container directly
+
+The `db` container exposes port 5432 on your Mac, so you can connect with psql or a GUI tool like TablePlus:
+
+```bash
+psql postgresql://gridpulse:gridpulse@localhost:5432/gridpulse
+```
+
+### How the database volume works
+
+PostgreSQL data is stored in a Docker named volume called `postgres_data`. This volume lives on your Mac's disk (managed by Docker) and is independent of the containers. Stopping or restarting containers does not delete your data.
+
+```bash
+# Stop containers — data is preserved
+docker compose down
+
+# Start again — all data is intact
+docker compose up
+```
+
+The only way to wipe the database is to explicitly remove the volume:
+
+```bash
+# Destroys ALL database data — you will need to re-run setup scripts
+docker compose down -v
+```
+
+### Stop containers
+
+```bash
+# Stop and remove containers — volume is preserved
+docker compose down
+
+# Stop without removing containers (faster restart)
+docker compose stop
+```
+
+### Rebuild after code changes
+
+If you change backend Python code or frontend TypeScript, rebuild before starting:
+
+```bash
+docker compose up --build
+```
+
+If only backend code changed, you can rebuild just that service:
+
+```bash
+docker compose up --build backend
+```
+
+### Start without rebuilding (after a stop)
+
+```bash
+docker compose up
+```
+
+No `--build` needed if no code or dependency files have changed.
+
+### Common Docker errors and fixes
+
+**`docker: Cannot connect to the Docker daemon`**
+Docker Desktop is not running. Open Docker Desktop and wait for the whale icon to stop animating, then try again.
+
+**`Unable to find image '...' locally` then pull error**
+You ran `docker run` before `docker build`. Run `docker compose up --build` instead of `docker run` directly.
+
+**Backend starts but `/drivers` returns 500**
+The backend can reach uvicorn but cannot connect to PostgreSQL. Most common causes:
+- The `db` container health check has not passed yet — wait 10–15 seconds and try again
+- You forgot to create the tables: `docker compose exec backend python scripts/create_tables.py`
+- You forgot to seed data: `docker compose exec backend python scripts/sync_f1_data.py`
+
+**Frontend loads but API calls fail / CORS error**
+The `VITE_API_URL` build argument was baked into the frontend image at build time. Check that it is `http://localhost:8000`. If you changed the backend port, rebuild the frontend image with `docker compose up --build frontend`.
+
+**Port already in use (`bind: address already in use`)**
+Something on your Mac is already using port 8000, 3000, or 5432. Find and stop the conflicting process, or stop your local uvicorn/Vite/PostgreSQL before starting compose.
+
+**`docker compose exec` returns `no such service`**
+Containers are not running. Run `docker compose up --build` first, then use `exec` in a second terminal.
+
+**Changes to `.env` are not picked up**
+Stop and restart the stack: `docker compose down && docker compose up`. Environment variables are injected at container start — a running container does not re-read `.env` automatically.
+
+**Database data is gone after restart**
+You ran `docker compose down -v`. The `-v` flag deletes volumes. Without `-v`, data persists. Re-run the setup scripts to restore it.
+
+---
+
 ## Verifying Synced Data in PostgreSQL
 
 Connect to psql after running the sync:
@@ -2627,8 +2814,8 @@ The following features are planned but not yet built:
 - Live race data of any kind
 - WebSockets
 - Redis
-- Docker
 - Alembic database migrations
+- Automated CI/CD pipeline and production deployment
 - ML predictions
 
 ---
@@ -2680,8 +2867,8 @@ Analytics page at `GET /analytics/sessions/{id}` and `/sessions/:id/analytics`. 
 **Phase 15 — Sync-Based Favourite Driver Session Alerts** *(complete)*
 Per-session alert detection from stored OpenF1 data — not live timing. Four alert types supported: fastest stored lap, tyre strategy summary, race control mention (structured `driver_number` column), and lap comparison note (race/sprint sessions only). Manual CLI script and dev API endpoint for alert generation. Frontend Notifications page updated with type-specific icons and badges. Dashboard Driver Updates expanded to all six `favourite_driver_*` types. Compact alert panels added to Session Dashboard and Strategy Dashboard. AI context updated with alert section and explicit grounding rules for alert questions.
 
-**Phase 16 — Docker, Testing, CI/CD, and Deployment**
-Docker and Docker Compose setup, automated tests, CI/CD pipeline, and production-style deployment configuration.
+**Phase 16 — Docker, Testing, CI/CD, and Deployment** *(in progress)*
+Docker and Docker Compose setup for local development (complete). Automated pytest test suite, GitHub Actions CI workflow, and production deployment preparation in progress.
 
 **Phase 17 — ML Prediction Layer**
 Machine learning models for podium prediction, pit window estimation, and tyre degradation prediction.
