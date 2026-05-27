@@ -1,5 +1,7 @@
 """
 Sync historical OpenF1 data for one session into the local database.
+After a successful sync, favourite-driver alerts are generated automatically
+for any users who have favourited a driver with data in the session.
 
 Usage:
     # Sync a specific session by its OpenF1 session_key:
@@ -7,6 +9,9 @@ Usage:
 
     # List all sessions for a year (to find the key you want):
     python scripts/sync_openf1_session.py --list 2024
+
+To generate alerts independently (without re-syncing):
+    python scripts/generate_favorite_driver_alerts.py --session-id <id>
 """
 
 import argparse
@@ -29,6 +34,7 @@ from app.services.openf1_ingestion import (
     ingest_weather,
     link_session,
 )
+from app.services.favorite_driver_alerts import generate_session_alerts
 
 
 def cmd_list(year: int) -> None:
@@ -91,6 +97,25 @@ def cmd_sync(session_key: int) -> None:
         print(f"  Race control    : {rc['inserted']} inserted ({rc['deleted']} replaced)")
         print(f"  Stints          : {stints['inserted']} inserted")
         print(f"  Laps            : {laps['inserted']} inserted")
+
+        print("\n=== Favourite-driver alert generation ===")
+        print("  Alert generation started...")
+        try:
+            result = generate_session_alerts(session_id, db)
+            if "error" in result:
+                print(f"  Error: {result['error']}")
+            elif not result.get("is_synced", True):
+                print(f"  Skipped: {result.get('message', 'session not synced')}")
+            else:
+                print(f"  Drivers checked : {result['favorite_drivers_checked']}")
+                print(f"  Alerts created  : {result['total_created']}")
+                print(f"  Duplicates skipped: {result['total_skipped']}")
+                if result.get("emails_sent"):
+                    print(f"  Emails sent     : {result['emails_sent']}")
+                if result.get("emails_failed"):
+                    print(f"  Emails failed   : {result['emails_failed']}")
+        except Exception as e:
+            print(f"  Alert generation failed (sync data is still saved): {e}")
 
     finally:
         db.close()
