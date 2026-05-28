@@ -2868,7 +2868,7 @@ Analytics page at `GET /analytics/sessions/{id}` and `/sessions/:id/analytics`. 
 Per-session alert detection from stored OpenF1 data — not live timing. Four alert types supported: fastest stored lap, tyre strategy summary, race control mention (structured `driver_number` column), and lap comparison note (race/sprint sessions only). Manual CLI script and dev API endpoint for alert generation. Frontend Notifications page updated with type-specific icons and badges. Dashboard Driver Updates expanded to all six `favourite_driver_*` types. Compact alert panels added to Session Dashboard and Strategy Dashboard. AI context updated with alert section and explicit grounding rules for alert questions.
 
 **Phase 16 — Docker, Testing, CI/CD, and Deployment** *(in progress)*
-Docker and Docker Compose setup for local development (complete). Automated pytest test suite, GitHub Actions CI workflow, and production deployment preparation in progress.
+Docker and Docker Compose setup for local development (complete). Automated pytest test suite (18 tests, SQLite in-memory). GitHub Actions CI runs backend tests and frontend build+lint on every push. Deployment preparation documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 **Phase 17 — ML Prediction Layer**
 Machine learning models for podium prediction, pit window estimation, and tyre degradation prediction.
