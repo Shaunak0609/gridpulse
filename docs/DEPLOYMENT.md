@@ -3,6 +3,9 @@
 This document covers what you need to know before deploying GridPulse to a public
 hosting provider. The app is not deployed yet — this is a preparation reference.
 
+For a full description of every environment variable and its default value, see
+[docs/ENVIRONMENT.md](ENVIRONMENT.md).
+
 ---
 
 ## Recommended Architecture
