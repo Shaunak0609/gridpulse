@@ -15,10 +15,12 @@ module is imported, so database.py never tries to connect to PostgreSQL.
 
 import os
 
-# Force SQLite before importing anything from app.
-# database.py reads DATABASE_URL at module level — it must be set first.
-# Using os.environ (not setdefault) so this always wins, even if .env is present.
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+# TEST_DATABASE_URL lets you point the test suite at a real PostgreSQL database
+# (e.g. a dedicated gridpulse_test database) instead of SQLite.
+# If it is not set, tests fall back to an in-memory SQLite database.
+# Either way, the development database is never touched.
+_TEST_DB_URL = os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:")
+os.environ["DATABASE_URL"] = _TEST_DB_URL
 
 # Provide fallbacks for secrets that FastAPI reads at startup.
 # In CI there is no .env file; locally these are already set in .env.
