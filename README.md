@@ -8,7 +8,7 @@ This repository contains the backend API built with Python and FastAPI.
 
 ---
 
-## Current Status — Phase 15
+## Current Status — Phase 16
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -1304,6 +1304,130 @@ Stop and restart the stack: `docker compose down && docker compose up`. Environm
 
 **Database data is gone after restart**
 You ran `docker compose down -v`. The `-v` flag deletes volumes. Without `-v`, data persists. Re-run the setup scripts to restore it.
+
+---
+
+## Backend Testing
+
+GridPulse has an automated test suite using pytest. Tests run against an in-memory SQLite database — the real PostgreSQL database is never touched.
+
+### Run the tests
+
+```bash
+# From the repo root with your virtual environment active
+python -m pytest
+```
+
+Expected output:
+
+```
+..................                 [100%]
+18 passed in X.XXs
+```
+
+### What the tests cover
+
+| Test file | What it tests |
+|---|---|
+| `tests/test_health.py` | `GET /` and `GET /health` return correct responses |
+| `tests/test_auth.py` | Signup, login, duplicate email rejection, JWT token, `GET /users/me` |
+| `tests/test_drivers.py` | `GET /drivers` returns a list, `GET /drivers/{id}` returns 404 when not found |
+
+### How test isolation works
+
+- Tests use an in-memory SQLite database via `StaticPool` — every connection shares the same database, nothing is written to disk.
+- `DATABASE_URL` is forced to `sqlite:///:memory:` before any app module is imported, so the PostgreSQL connection is never attempted.
+- JWT secret and algorithm are set to safe dummy values in `tests/conftest.py`.
+- There are no calls to Groq, Resend, Google OAuth, or any external API in the test suite.
+
+### Optional: run against a real Postgres database
+
+If you want tests to run against a real database instead of SQLite (for example, to catch Postgres-specific behaviour), create a dedicated test database and set `TEST_DATABASE_URL`:
+
+```bash
+TEST_DATABASE_URL=postgresql://your_username:your_password@localhost:5432/gridpulse_test python -m pytest
+```
+
+The development database is never used by tests either way.
+
+---
+
+## Frontend Quality Checks
+
+### Build
+
+TypeScript type-check and Vite bundle:
+
+```bash
+cd frontend
+npm run build
+```
+
+A successful build prints `✓ built in X.XXs` and writes output to `frontend/dist/`. The chunk size warning about the JS bundle being over 500 KB is expected for an app this size — it is not an error.
+
+### Lint
+
+ESLint with TypeScript support and React Hooks rules:
+
+```bash
+cd frontend
+npm run lint
+```
+
+Zero errors means the lint check passes. One pre-existing warning in `GoogleCallback.tsx` about `useEffect` dependencies is expected and does not fail the check.
+
+---
+
+## GitHub Actions CI
+
+Every push and pull request automatically runs two jobs in parallel on GitHub's servers.
+
+**Backend job** — sets up Python 3.14, installs `requirements.txt`, runs `pytest`. No real database or API keys are needed — tests use SQLite in-memory with a dummy JWT secret.
+
+**Frontend job** — sets up Node 20, runs `npm ci`, then `npm run build` and `npm run lint`.
+
+The workflow is defined in `.github/workflows/ci.yml`. You can see results under the **Actions** tab on the GitHub repository page.
+
+---
+
+## Environment Variables
+
+All environment variables are documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
+
+Quick summary:
+
+| Variable | Required locally | Required in production |
+|---|---|---|
+| `DATABASE_URL` | Yes | Yes |
+| `JWT_SECRET_KEY` | Yes | Yes |
+| `FRONTEND_URL` | Yes | Yes |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` | Only for Google sign-in | Yes |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Only for email | Yes |
+| `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL` | Only for AI chat | Yes |
+| `F1_SEASON` | No (defaults to 2026) | No |
+| `VITE_API_URL` | No (defaults to localhost:8000) | Yes (frontend host) |
+
+Copy `.env.example` to `.env` and fill in your values. The `.env` file is gitignored and must never be committed.
+
+---
+
+## Deployment Preparation
+
+GridPulse is not deployed to production yet. A full deployment guide is in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+Recommended hosting stack:
+
+| Piece | Service |
+|---|---|
+| Backend (FastAPI) | Render, Railway, or Fly.io |
+| Frontend (React) | Vercel or Netlify |
+| Database (PostgreSQL) | Render Postgres, Railway Postgres, or Supabase |
+
+Key things to do before going live:
+- Set all environment variables in your hosting dashboard (see `docs/ENVIRONMENT.md`)
+- Add your production backend URL as an Authorized Redirect URI in Google Cloud Console
+- Verify your sending domain on Resend
+- Set `VITE_API_URL` to your production backend URL on the frontend host before building
 
 ---
 
@@ -2815,7 +2939,7 @@ The following features are planned but not yet built:
 - WebSockets
 - Redis
 - Alembic database migrations
-- Automated CI/CD pipeline and production deployment
+- Production deployment — CI runs on GitHub Actions but the app is not deployed to a public host yet (see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the preparation guide)
 - ML predictions
 
 ---
@@ -2867,8 +2991,8 @@ Analytics page at `GET /analytics/sessions/{id}` and `/sessions/:id/analytics`. 
 **Phase 15 — Sync-Based Favourite Driver Session Alerts** *(complete)*
 Per-session alert detection from stored OpenF1 data — not live timing. Four alert types supported: fastest stored lap, tyre strategy summary, race control mention (structured `driver_number` column), and lap comparison note (race/sprint sessions only). Manual CLI script and dev API endpoint for alert generation. Frontend Notifications page updated with type-specific icons and badges. Dashboard Driver Updates expanded to all six `favourite_driver_*` types. Compact alert panels added to Session Dashboard and Strategy Dashboard. AI context updated with alert section and explicit grounding rules for alert questions.
 
-**Phase 16 — Docker, Testing, CI/CD, and Deployment** *(in progress)*
-Docker and Docker Compose setup for local development (complete). Automated pytest test suite (18 tests, SQLite in-memory). GitHub Actions CI runs backend tests and frontend build+lint on every push. Deployment preparation documented in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**Phase 16 — Docker, Testing, CI/CD, and Deployment** *(complete except production deploy)*
+Docker and Docker Compose for local development — PostgreSQL, FastAPI backend, and React frontend start with a single `docker compose up --build`. Automated pytest suite (18 tests) using SQLite in-memory so the real database is never touched. Frontend build (`tsc -b && vite build`) and lint (ESLint + typescript-eslint + react-hooks) run as quality checks. GitHub Actions CI runs both jobs on every push and pull request with no real secrets or external API calls. Environment variables documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). Deployment preparation guide in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Production deployment is not yet complete.
 
 **Phase 17 — ML Prediction Layer**
 Machine learning models for podium prediction, pit window estimation, and tyre degradation prediction.
@@ -2880,9 +3004,11 @@ React Native / Expo mobile app consuming the same FastAPI backend.
 
 ## Development Notes
 
-- The `.env` file is gitignored and will never be committed. Never hardcode credentials in source files.
+- The `.env` file is gitignored and will never be committed. Never hardcode credentials in source files. See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the full variable reference.
 - `scripts/create_tables.py` is safe to re-run. It skips tables that already exist.
 - `scripts/sync_f1_data.py` is safe to re-run multiple times. It uses upsert logic and will not create duplicate rows.
 - `scripts/seed.py` inserts a small hardcoded dataset used during Phase 1 development. It is no longer needed now that `sync_f1_data.py` exists.
 - There is no Alembic migration system yet. For model changes, drop the affected tables manually and recreate them with `create_tables.py`.
 - Data sync is manual. There is no scheduled or automatic sync yet.
+- Run `python -m pytest` to execute the test suite. Tests use SQLite in-memory and never touch the development database.
+- GitHub Actions runs `pytest` and the frontend build+lint automatically on every push. Check the **Actions** tab on GitHub to see results.
