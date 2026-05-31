@@ -13,7 +13,8 @@ interface AuthContextValue {
   isAuthenticated: boolean
   loading: boolean
   login: (payload: LoginPayload) => Promise<void>
-  loginWithToken: (token: string) => Promise<void>
+  loginWithToken: (token: string) => Promise<AuthUser>
+  refreshUser: () => Promise<void>
   logout: () => void
 }
 
@@ -58,10 +59,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   // Used after Google sign-in: the token arrives via URL, not from a form submit.
-  async function loginWithToken(token: string) {
-    const fetchedUser = await getCurrentUser(token)
-    localStorage.setItem(TOKEN_KEY, token)
-    setToken(token)
+  // Returns the fetched user so the caller can inspect it (e.g. check for missing username).
+  async function loginWithToken(incomingToken: string): Promise<AuthUser> {
+    const fetchedUser = await getCurrentUser(incomingToken)
+    localStorage.setItem(TOKEN_KEY, incomingToken)
+    setToken(incomingToken)
+    setUser(fetchedUser)
+    return fetchedUser
+  }
+
+  // Re-fetches /users/me and updates state — call this after updating profile
+  // so the navbar and other components immediately reflect the new username.
+  async function refreshUser() {
+    const saved = token ?? localStorage.getItem(TOKEN_KEY)
+    if (!saved) return
+    const fetchedUser = await getCurrentUser(saved)
     setUser(fetchedUser)
   }
 
@@ -80,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         login,
         loginWithToken,
+        refreshUser,
         logout,
       }}
     >

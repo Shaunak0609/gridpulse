@@ -231,7 +231,7 @@ function NotificationRow({
           <NotificationBadge type={notification.type} />
         </p>
         {notification.message && (
-          <p className="text-gray-500 text-xs mt-0.5 leading-relaxed">{notification.message}</p>
+          <p className="text-gray-500 text-xs mt-0.5 leading-relaxed break-words">{notification.message}</p>
         )}
         <p className="text-gray-700 text-xs font-mono mt-1">{formatDateTime(notification.created_at)}</p>
       </div>

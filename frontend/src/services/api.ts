@@ -346,6 +346,20 @@ export const getAIHistory = (token: string): Promise<AIHistoryItem[]> =>
     return data as AIHistoryItem[]
   })
 
+export const updateProfile = (
+  token: string,
+  payload: { username?: string; timezone?: string },
+): Promise<AuthUser> =>
+  fetch(`${API_BASE}/users/me/profile`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+  }).then(async res => {
+    const data = await res.json()
+    if (!res.ok) throw new Error(data?.detail ?? 'Failed to update profile')
+    return data as AuthUser
+  })
+
 export const getAIUsage = (token: string): Promise<AIUsage> =>
   fetch(`${API_BASE}/ai/usage`, {
     headers: { Authorization: `Bearer ${token}` },

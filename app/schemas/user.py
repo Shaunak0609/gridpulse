@@ -53,3 +53,8 @@ class NotificationPreferencesResponse(BaseModel):
 class NotificationPreferencesUpdate(BaseModel):
     favorite_driver_notifications_enabled: bool | None = None
     favorite_driver_email_alerts_enabled: bool | None = None
+
+
+class UserProfileUpdate(BaseModel):
+    username: str | None = None
+    timezone: str | None = None

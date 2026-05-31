@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   getEmailPreferences,
   updateEmailPreferences,
   getNotificationPreferences,
   updateNotificationPreferences,
   sendTestEmail,
+  updateProfile,
 } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type { EmailPreferences, NotificationPreferences } from '../types'
@@ -82,7 +84,10 @@ function SkeletonRow() {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const { token, user } = useAuth()
+  const { token, user, refreshUser } = useAuth()
+  const [searchParams] = useSearchParams()
+  const isSetup = searchParams.get('setup') === '1'
+
   const [prefs, setPrefs] = useState<EmailPreferences | null>(null)
   const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null)
   const [loading, setLoading] = useState(true)
@@ -90,6 +95,11 @@ export default function Settings() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [testMessage, setTestMessage] = useState<string | null>(null)
+
+  // Username editing state
+  const [username, setUsername] = useState(user?.username ?? '')
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [usernameError, setUsernameError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -101,6 +111,26 @@ export default function Settings() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [token])
+
+  // Keep username input in sync if user object changes (e.g. after refreshUser)
+  useEffect(() => {
+    setUsername(user?.username ?? '')
+  }, [user?.username])
+
+  async function handleSaveUsername(e: React.FormEvent) {
+    e.preventDefault()
+    if (!token) return
+    setUsernameStatus('saving')
+    setUsernameError(null)
+    try {
+      await updateProfile(token, { username: username.trim() })
+      await refreshUser()
+      setUsernameStatus('saved')
+    } catch (e) {
+      setUsernameStatus('error')
+      setUsernameError(e instanceof Error ? e.message : 'Failed to save username.')
+    }
+  }
 
   async function handleToggle(field: keyof EmailPreferences, value: boolean) {
     if (!token || !prefs) return
@@ -158,7 +188,54 @@ export default function Settings() {
           Account
         </p>
         <h1 className="text-3xl font-bold text-white">Settings</h1>
-        <p className="text-gray-400 mt-1 text-sm">Manage your notification preferences.</p>
+        <p className="text-gray-400 mt-1 text-sm">Manage your profile and notification preferences.</p>
+      </div>
+
+      {/* Setup banner — shown when redirected from Google sign-in with no username */}
+      {isSetup && (
+        <div className="mb-6 px-4 py-3 bg-red-950/40 border border-red-700/50 rounded-xl">
+          <p className="text-red-300 text-sm font-medium">Welcome to GridPulse!</p>
+          <p className="text-red-400/80 text-xs mt-0.5">
+            You signed in with Google. Set a username below so your profile looks great.
+          </p>
+        </div>
+      )}
+
+      {/* Username card */}
+      <div className="mb-6">
+        <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3 px-1">
+          Profile
+        </p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-5">
+          <p className="text-sm font-medium text-white mb-0.5">Username</p>
+          <p className="text-xs text-gray-500 mb-4">
+            Shown in the navbar and your profile. 3–30 characters, letters, numbers, _ and - only.
+          </p>
+          <form onSubmit={handleSaveUsername} className="flex gap-3 items-start flex-wrap">
+            <input
+              type="text"
+              value={username}
+              onChange={e => { setUsername(e.target.value); setUsernameStatus('idle') }}
+              placeholder="e.g. verstappen_fan"
+              minLength={3}
+              maxLength={30}
+              className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-red-500 transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={usernameStatus === 'saving' || username.trim() === (user?.username ?? '')}
+              className="text-sm text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 px-4 py-2.5 rounded-lg transition-colors duration-150 disabled:opacity-40 whitespace-nowrap"
+            >
+              {usernameStatus === 'saving' ? 'Saving…' : 'Save'}
+            </button>
+          </form>
+          {usernameStatus === 'saved' && (
+            <p className="text-green-500 text-xs mt-2">Username updated.</p>
+          )}
+          {usernameStatus === 'error' && usernameError && (
+            <p className="text-red-400 text-xs mt-2">{usernameError}</p>
+          )}
+        </div>
       </div>
 
       {/* Load error */}

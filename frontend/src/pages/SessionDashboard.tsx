@@ -116,7 +116,7 @@ function LapStatsSection({ stats }: { stats: DashboardLapStats }) {
     { label: 'Max lap number', value: stats.max_lap ?? '—' },
   ]
   return (
-    <div className="grid grid-cols-3 gap-px bg-gray-800/50">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-gray-800/50">
       {items.map(item => (
         <div key={item.label} className="bg-gray-900 px-4 py-3">
           <p className="text-gray-600 text-xs mb-0.5">{item.label}</p>

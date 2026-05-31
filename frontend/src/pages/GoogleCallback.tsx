@@ -21,11 +21,18 @@ export default function GoogleCallback() {
     }
 
     loginWithToken(token)
-      .then(() => navigate('/'))
+      .then(fetchedUser => {
+        // If the Google user has no username yet, send them to Settings to set one.
+        if (!fetchedUser.username) {
+          navigate('/settings?setup=1')
+        } else {
+          navigate('/')
+        }
+      })
       .catch(() =>
         navigate('/login?error=Google+sign-in+succeeded+but+your+session+could+not+be+started.')
       )
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-[70vh] flex items-center justify-center">

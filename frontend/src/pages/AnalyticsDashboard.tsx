@@ -134,7 +134,7 @@ function SessionPaceSummary({
       empty={!hasData}
       emptyMessage="No lap data has been synced for this session yet."
     >
-      <div className="grid grid-cols-3 gap-px bg-gray-800/50">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-gray-800/50">
         {stats.map(s => (
           <div key={s.label} className="bg-gray-900 px-5 py-4">
             <p className="text-gray-600 text-xs mb-1">{s.label}</p>
@@ -763,6 +763,7 @@ function StintMiniTable({ stints }: { stints: AnalyticsStintEntry[] }) {
   if (stints.length === 0) return null
   const sorted = [...stints].sort((a, b) => (a.stint_number ?? 0) - (b.stint_number ?? 0))
   return (
+    <div className="overflow-x-auto">
     <table className="w-full text-xs mt-2">
       <thead>
         <tr className="text-gray-700 uppercase tracking-wider">
@@ -789,6 +790,7 @@ function StintMiniTable({ stints }: { stints: AnalyticsStintEntry[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   )
 }
 
