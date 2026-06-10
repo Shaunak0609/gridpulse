@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session as DBSession
 
@@ -39,6 +39,20 @@ def _parse_dt(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except (ValueError, TypeError):
         return None
+
+
+def _to_utc_naive(dt: datetime) -> datetime:
+    """
+    Convert any datetime to a naive UTC datetime for set-membership checks.
+
+    psycopg2 may return TIMESTAMPTZ values using its own FixedOffsetTimezone
+    type rather than Python's built-in timezone, which can cause hash mismatches
+    when comparing against datetimes parsed from OpenF1 ISO strings. Normalising
+    both sides to naive UTC eliminates the ambiguity entirely.
+    """
+    if dt.tzinfo is None:
+        return dt  # assume already UTC
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 # ─── Session linking ──────────────────────────────────────────────────────────
@@ -316,9 +330,12 @@ def ingest_weather(session_id: int, session_key: int, db: DBSession) -> dict:
     if not raw:
         return {"inserted": 0, "skipped": 0}
 
-    # Load existing timestamps so we can skip rows already in the database.
-    existing_dates: set[datetime] = {
-        row[0]
+    # Seed `seen` with timestamps already in the DB (normalised to naive UTC).
+    # We add to `seen` as we process each OpenF1 row so that duplicate
+    # timestamps within the same response are also skipped, not just rows
+    # that conflict with the database.
+    seen: set[datetime] = {
+        _to_utc_naive(row[0])
         for row in db.query(WeatherSample.date)
         .filter(WeatherSample.session_id == session_id)
         .all()
@@ -330,9 +347,16 @@ def ingest_weather(session_id: int, session_key: int, db: DBSession) -> dict:
 
     for row in raw:
         dt = _parse_dt(row.get("date"))
-        if dt is None or dt in existing_dates:
+        if dt is None:
             skipped += 1
             continue
+
+        dt_key = _to_utc_naive(dt)
+        if dt_key in seen:
+            skipped += 1
+            continue
+
+        seen.add(dt_key)
 
         # OpenF1 sends rainfall as 0 / 1 (integer), not a Python bool.
         rainfall_raw = row.get("rainfall")

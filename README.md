@@ -2,7 +2,7 @@
 
 **F1 Race Intelligence Platform**
 
-GridPulse is a Formula 1 companion app for fans who want to follow races more intelligently. It provides driver and team information, race calendars, standings, and will eventually support live race data, user accounts, notifications, and AI-powered race analysis.
+GridPulse is a Formula 1 companion app for fans who want to follow races more intelligently. It provides driver and team information, race calendars, standings, and will supports historical and near live race data, user accounts, notifications, and AI-powered race analysis.
 
 This repository contains the backend API built with Python and FastAPI.
 ---
@@ -168,11 +168,6 @@ https://gridpulse-mu.vercel.app/
 | `favorite_driver_standing` | Favourite driver update | After data sync, or via dev endpoint | "Max Verstappen is currently P1 in the 2026 driver standings with 136 points." |
 | `favorite_driver_wins` | Race wins update | After data sync, or via dev endpoint, only when wins > 0 | "Max Verstappen has 3 wins in the 2026 season." |
 
-**What is not yet supported:**
-- Per-race finish position notifications — requires a `race_results` table (no race result data ingested yet)
-- Per-qualifying position notifications — requires a `qualifying_results` table
-- Live or real-time alerts of any kind
-
 ### Phase 9.5 — Automated Notification Scheduling (complete)
 
 - `scripts/sync_f1_data.py` extended — after all F1 data sync steps complete, both notification generators (`generate_standing_notifications` and `generate_wins_notifications`) are called automatically using the same open database session; each generator is wrapped in its own `try/except` so a failure in one does not prevent the other from running
@@ -237,12 +232,6 @@ AI_MODEL=llama-3.1-8b-instant
 `AI_PROVIDER` — `groq` (default, free tier) or `anthropic`.
 `AI_API_KEY` — your API key from [console.groq.com](https://console.groq.com) or [console.anthropic.com](https://console.anthropic.com).
 `AI_MODEL` — model name for the chosen provider. For Groq: `llama-3.1-8b-instant` (fast, free) or `llama-3.3-70b-versatile` (higher quality). For Anthropic: `claude-haiku-4-5-20251001` or `claude-sonnet-4-6`.
-
-**What is not yet included in Phase 10:**
-- Suggested prompt cards on the AI page — planned for a future UI pass
-- Multi-turn conversation threading — each question is independent (single-turn Q&A)
-- Streaming responses
-- Race results, qualifying data, or lap times in AI context — those data tables do not exist yet
 
 ### Phase 11 — OpenF1 / FastF1 Historical Data Upgrade (complete)
 
@@ -310,13 +299,6 @@ Phase 11 adds historical session data to GridPulse using the OpenF1 public API. 
 
 **FastF1 planning:**
 FastF1 is a Python library providing car telemetry (speed, throttle, brake, RPM, gear, DRS) and GPS position data that OpenF1 does not offer. Integration is planned for a later phase when track map and advanced analytics features are ready. FastF1 is not used in Phase 11 — OpenF1 covers all Phase 11 requirements via REST. See the FastF1 planning notes below.
-
-**What is not yet included in Phase 11:**
-- Individual lap times per driver are stored but not yet used in charts or analytics — that is Phase 12+
-- Qualifying results and finishing positions — no `race_results` or `qualifying_results` table exists yet
-- FastF1 telemetry data (speed traces, GPS position, braking points)
-- Automatic session sync — the sync script must be run manually
-- Constructor standings data
 
 ### Phase 12 — Historical Race Dashboard (complete)
 
@@ -413,16 +395,6 @@ Phase 12 adds a structured per-session dashboard built entirely from stored Open
    python scripts/sync_openf1_session.py --session-key 9158
    ```
 3. Open the Calendar page, expand the race, and click **Dashboard →** on the session row.
-
-**What is not included in Phase 12:**
-- Live timing of any kind — all data is from stored OpenF1 historical snapshots
-- WebSockets, Redis, or any real-time transport
-- Track map or moving driver position dots
-- Lap time charts or visualisations
-- ML predictions or strategy recommendations
-- Official race classifications — the finishing order is derived, not authoritative
-- Pit stop duration data
-- Qualifying or practice result tables
 
 ### Phase 13 — Strategy Dashboard (complete)
 
@@ -539,16 +511,6 @@ The Strategy Dashboard requires OpenF1 data for the session to be synced first. 
    python scripts/sync_openf1_session.py --session-key <key>
    ```
 3. Open the Calendar page and click **Strategy →** on any past session row, or navigate directly to `/sessions/:id/strategy`.
-
-**What is not included in Phase 13:**
-- Live timing of any kind — all data is from stored OpenF1 historical snapshots
-- WebSockets, Redis, or any real-time transport
-- Track map or moving driver position dots
-- Lap time charts, pace trend charts, or any visualisation layer
-- ML predictions or strategy recommendations
-- Official pit stop timing or duration data — pit windows are derived from stint transitions
-- Tyre degradation trend analysis — requires per-lap compound data not currently tracked
-- Qualifying or practice session strategy views — the page works best for race and sprint sessions
 
 ### Phase 14 — Advanced Analytics (complete)
 
@@ -682,17 +644,6 @@ The Analytics Dashboard requires OpenF1 data for the session to be synced first.
    ```
 3. Open the Calendar page and click **Analytics →** on any past session row, or navigate directly to `/sessions/:id/analytics`.
 
-**What is not included in Phase 14:**
-- Live timing of any kind — all data is from stored OpenF1 historical snapshots
-- WebSockets, Redis, or any real-time transport
-- Track map or moving driver position dots
-- ML predictions or strategy recommendations
-- Full per-lap time sequences per driver — only fastest and average are computed
-- Official sector best times from timing towers
-- Qualifying vs race pace comparison — requires a qualifying session to be synced and linked to the same race
-- Tyre degradation curves — requires per-lap compound data not currently tracked
-- Telemetry overlays (speed, throttle, brake, GPS position) — planned for a FastF1 integration phase
-
 ### Phase 15 — Sync-Based Favourite Driver Session Alerts (complete)
 
 Phase 15 adds per-session alert detection for favourited drivers. **These are not live alerts** — they are generated from stored OpenF1 historical data after a session is synced. The system reads lap, stint, and race control records to detect events involving a user's favourited drivers, then creates in-app notifications (and optional emails) for each affected user.
@@ -764,15 +715,6 @@ Phase 15 adds per-session alert detection for favourited drivers. **These are no
 | `favorite_driver_rc_mention` | Any RC row has `driver_number` matching the driver | `race_control_messages` | All synced sessions |
 | `favorite_driver_lap_comparison` | Driver completed ≥4 fewer laps than session max | `laps` | Race and sprint sessions only |
 
-**What is intentionally NOT supported and why:**
-
-| Unsupported alert | Reason |
-|---|---|
-| Position gains or losses during a race | The `laps` table has no per-lap position column |
-| Official retirement or DNF confirmation | No `race_results` table exists; only lap count comparison is available |
-| Penalty confirmation via free-text search | RC message text is inconsistent across OpenF1 sessions; only the structured `driver_number` column is reliable |
-| Any live or real-time alerts | All data is from stored historical snapshots |
-
 **Dedup:** One notification per `(user_id, type, related_driver_id, related_session_id)`. Running the script or endpoint more than once for the same session is safe — existing alerts are counted as skipped, not duplicated.
 
 **When alerts are generated:**
@@ -783,15 +725,6 @@ Alerts are not generated automatically. The recommended workflow is:
 2. Generate alerts: `python scripts/generate_favorite_driver_alerts.py --session-id <id>`
 
 Alternatively, trigger via the API endpoint after syncing.
-
-**What is not included in Phase 15:**
-- Automatic alert generation after sync — alerts must be generated manually
-- Live or real-time alerts of any kind
-- WebSockets, Redis, or push notifications
-- Position change alerts — no per-lap position data in OpenF1
-- Official retirement or DNF notifications — no `race_results` table
-- Track map or moving driver position visualisation
-- ML predictions of any kind
 
 ---
 
@@ -2997,12 +2930,6 @@ Per-session alert detection from stored OpenF1 data — not live timing. Four al
 
 **Phase 16 — Docker, Testing, CI/CD, and Deployment** *(complete except production deploy)*
 Docker and Docker Compose for local development — PostgreSQL, FastAPI backend, and React frontend start with a single `docker compose up --build`. Automated pytest suite (18 tests) using SQLite in-memory so the real database is never touched. Frontend build (`tsc -b && vite build`) and lint (ESLint + typescript-eslint + react-hooks) run as quality checks. GitHub Actions CI runs both jobs on every push and pull request with no real secrets or external API calls. Environment variables documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). Deployment preparation guide in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Production deployment is not yet complete.
-
-**Phase 17 — ML Prediction Layer**
-Machine learning models for podium prediction, pit window estimation, and tyre degradation prediction.
-
-**Phase 18 — Mobile App**
-React Native / Expo mobile app consuming the same FastAPI backend.
 
 ---
 
