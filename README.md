@@ -12,7 +12,7 @@ https://gridpulse-mu.vercel.app/
 
 ---
 
-## Current Status — Phase 16
+## Current Status — Phase 17
 
 ### Phase 1 — Backend Foundations (complete)
 
@@ -871,28 +871,102 @@ gridpulse/
 │   └── main.py
 ├── frontend/                     # React + Vite + TypeScript frontend (Phase 3)
 ├── scripts/
-│   ├── create_tables.py          # creates all tables including sessions
-│   ├── seed.py                   # inserts small local sample data (Phase 1)
+│   ├── create_tables.py          # creates all tables (idempotent; skips tables that already exist)
 │   ├── sync_f1_data.py           # fetches and stores real F1 data; runs notification generators after sync (Phase 9.5)
-│   ├── seed_sessions.py          # seeds 5 standard sessions per race (Phase 7.5)
-│   ├── migrate_add_email_preferences.py        # adds email preference columns to users (Phase 7)
-│   ├── migrate_add_reminder_email_tracking.py  # adds email_sent columns to reminders (Phase 7)
-│   ├── migrate_create_sessions_table.py        # creates sessions table (Phase 7.5)
-│   ├── migrate_add_reminder_session_id.py      # adds session_id to reminders (Phase 7.5)
-│   ├── migrate_create_favorites_tables.py           # creates favorite_drivers and favorite_teams tables (Phase 8)
-│   ├── migrate_add_favorite_driver_notifications.py # adds favorite_driver_notifications_enabled to users (Phase 9)
-│   ├── migrate_create_ai_requests_table.py          # creates ai_requests table (Phase 10)
-│   ├── migrate_add_openf1_session_fields.py         # adds openf1_session_key and related columns to sessions (Phase 11)
-│   ├── migrate_create_openf1_tables.py              # creates laps, stints, race_control_messages, weather_samples (Phase 11)
-│   ├── sync_openf1_session.py                       # CLI: --list YEAR or --session-key KEY to sync historical data (Phase 11)
+│   ├── sync_openf1_session.py    # CLI: --list YEAR or --session-key KEY to sync historical data (Phase 11)
 │   ├── send_due_reminder_emails.py                  # CLI script to send due reminder emails (Phase 7)
-│   ├── generate_favorite_driver_notifications.py    # CLI script to generate standing + wins notifications (Phase 9)
-│   ├── migrate_add_notification_session_id.py       # adds related_session_id to notifications table (Phase 15)
-│   └── generate_favorite_driver_alerts.py           # CLI: --list synced sessions, --session-id ID to generate alerts (Phase 15)
+│   ├── generate_favorite_driver_alerts.py           # CLI: --list synced sessions, --session-id ID to generate alerts (Phase 15)
+│   └── post_race_weekend_sync.py                     # CLI/cron: idempotent post-race-weekend sync — standings + completed session results (Phase 17)
 ├── .env                          # local environment variables (not committed)
 ├── .env.example                  # template showing required variables
 └── requirements.txt
 ```
+
+---
+
+## Automated Post-Race-Weekend Sync
+
+`scripts/post_race_weekend_sync.py` keeps GridPulse current after each F1 race
+weekend. It is designed to be run on a schedule (a weekly Render Cron Job) but
+is equally safe to run by hand.
+
+### What it does
+
+It **reuses the existing sync services** rather than duplicating them, in two
+phases:
+
+1. **Standings, calendar & schedule refresh** — calls
+   `app.services.data_ingestion.sync_all()`, which upserts teams, drivers, the
+   race calendar, the per-race session schedule, and **driver standings**
+   (leaderboards) from Jolpica.
+2. **Completed session results** — detects race weekends whose race day has
+   already passed (read from the `races` table), and for each one ingests
+   detailed results (laps, stints, weather, race control messages) for the
+   sessions that have **finished**, via `app.services.openf1_ingestion`
+   (`link_session` + the `ingest_*` functions).
+
+Because Dashboard, Strategy, Analytics, Calendar, and Leaderboards all read
+straight from the database, refreshing these tables is all that's needed — they
+serve the latest data on the next request with no extra step.
+
+> **Constructor/team standings:** the schema has a `DriverStanding` table but no
+> separate constructor-standings table, so there is no constructor *leaderboard*
+> to populate. The sync still refreshes team/constructor records (names) from
+> Jolpica's constructor-standings endpoint via `sync_all()`. No new model is
+> invented.
+
+### Run it locally
+
+```bash
+python scripts/post_race_weekend_sync.py            # sync the current F1_SEASON
+python scripts/post_race_weekend_sync.py --season 2026
+python scripts/post_race_weekend_sync.py --with-alerts   # also generate favourite-driver alerts (may send emails)
+```
+
+It uses the same `DATABASE_URL` (and optional `F1_SEASON`) from your environment
+/ `.env` as the rest of the app — no database URL is hardcoded, so it behaves
+identically locally and on Render.
+
+### Why it's safe to run repeatedly (idempotent)
+
+- `sync_all()` upserts — it updates existing rows or inserts new ones, never
+  creating duplicate teams, drivers, races, sessions, or standings.
+- A session's detail data is treated as "already synced" once its
+  `sessions.openf1_session_key` column is set; such sessions are skipped, so a
+  re-run does no redundant OpenF1 fetching. **No new database columns or
+  migration are required** — sync status is derived from existing data.
+- Only sessions whose `date_end` is in the past are ingested, so an in-progress
+  session is never half-synced. This also means a weekly cron that fires on a
+  weekend **without** a race simply finds nothing to do. Completion is read from
+  real session end timestamps, which correctly handles weekends finishing in
+  different time zones.
+- Nothing is deleted. **User-created reminders, favourites, notification
+  preferences, and accounts are never touched.**
+
+### Schedule it as a Render Cron Job
+
+Render Cron Jobs run a one-off command on a schedule in the same environment as
+your backend. Create one (Render Dashboard → **New** → **Cron Job**) pointing at
+this repo:
+
+| Setting | Value |
+|---|---|
+| **Command** | `python scripts/post_race_weekend_sync.py` |
+| **Schedule** | `0 6 * * 1` (every Monday 06:00 UTC — after the weekend's races) |
+| **Environment** | Same as the backend, must include `DATABASE_URL` (and `F1_SEASON` if not `2026`) |
+
+The weekday is not load-bearing: the script gates on database dates, so a
+Monday with no completed-but-unsynced weekend is a harmless no-op. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#post-race-weekend-sync-cron-job) for
+the full Render walkthrough.
+
+### Logs
+
+The script logs to stdout with timestamps (readable in Render's log viewer):
+sync start, each race weekend checked, which sessions were synced (with row
+counts), whether anything was skipped, when there's nothing to do, and a final
+summary line. Failures log a clear error and exit non-zero so Render marks the
+run as failed.
 
 ---
 
@@ -2931,6 +3005,9 @@ Per-session alert detection from stored OpenF1 data — not live timing. Four al
 **Phase 16 — Docker, Testing, CI/CD, and Deployment** *(complete except production deploy)*
 Docker and Docker Compose for local development — PostgreSQL, FastAPI backend, and React frontend start with a single `docker compose up --build`. Automated pytest suite (18 tests) using SQLite in-memory so the real database is never touched. Frontend build (`tsc -b && vite build`) and lint (ESLint + typescript-eslint + react-hooks) run as quality checks. GitHub Actions CI runs both jobs on every push and pull request with no real secrets or external API calls. Environment variables documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). Deployment preparation guide in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Production deployment is not yet complete.
 
+**Phase 17 — Automated Post-Race-Weekend Sync** *(complete)*
+Idempotent `scripts/post_race_weekend_sync.py` that refreshes standings/calendar/sessions via `sync_all()` and ingests completed session results via the OpenF1 ingestion service. Race-weekend completion is detected from the `races` table plus per-session `date_end`, so it is safe to run weekly (e.g. a Render Cron Job) — weekends without a completed-but-unsynced race are a no-op. No new database columns: sync status is derived from the existing `sessions.openf1_session_key` column. No data is deleted and user-created content is never touched. See [Automated Post-Race-Weekend Sync](#automated-post-race-weekend-sync).
+
 ---
 
 ## Development Notes
@@ -2940,6 +3017,6 @@ Docker and Docker Compose for local development — PostgreSQL, FastAPI backend,
 - `scripts/sync_f1_data.py` is safe to re-run multiple times. It uses upsert logic and will not create duplicate rows.
 - `scripts/seed.py` inserts a small hardcoded dataset used during Phase 1 development. It is no longer needed now that `sync_f1_data.py` exists.
 - There is no Alembic migration system yet. For model changes, drop the affected tables manually and recreate them with `create_tables.py`.
-- Data sync is manual. There is no scheduled or automatic sync yet.
+- Data sync can be run manually (`scripts/sync_f1_data.py`) or automatically after each race weekend (`scripts/post_race_weekend_sync.py`, see [Automated Post-Race-Weekend Sync](#automated-post-race-weekend-sync)).
 - Run `python -m pytest` to execute the test suite. Tests use SQLite in-memory and never touch the development database.
 - GitHub Actions runs `pytest` and the frontend build+lint automatically on every push. Check the **Actions** tab on GitHub to see results.
