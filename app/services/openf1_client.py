@@ -1,8 +1,16 @@
 import os
+import time
 
 import requests
 
 BASE_URL = os.getenv("OPENF1_BASE_URL", "https://api.openf1.org/v1")
+
+# OpenF1 is a free public API — no API key required, but it aggressively
+# rate-limits bursts of requests (HTTP 429). A single session pulls from
+# five endpoints back to back, so retry with backoff instead of failing
+# the whole sync on the first 429.
+MAX_RETRIES = 5
+INITIAL_BACKOFF_SECONDS = 2
 
 # OpenF1 is a free public API — no API key required.
 # Responses are JSON arrays. Every endpoint supports query parameters for
@@ -11,27 +19,42 @@ BASE_URL = os.getenv("OPENF1_BASE_URL", "https://api.openf1.org/v1")
 
 def _get(path: str, params: dict | None = None) -> list[dict]:
     """
-    Make a GET request to the OpenF1 API.
+    Make a GET request to the OpenF1 API, retrying on rate limiting (429).
 
     OpenF1 always returns a JSON array (even for a single result).
-    Raises RuntimeError on connection failure, timeout, or non-2xx response.
+    Raises RuntimeError on connection failure, timeout, or non-2xx response
+    that isn't resolved after retries.
     """
     url = f"{BASE_URL}{path}"
     print(f"  Fetching: {url}" + (f" params={params}" if params else ""))
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.ConnectionError:
-        raise RuntimeError(
-            "Could not connect to OpenF1 API. Check your internet connection."
-        )
-    except requests.exceptions.Timeout:
-        raise RuntimeError(f"Request timed out after 30 seconds: {url}")
-    except requests.exceptions.HTTPError:
-        raise RuntimeError(
-            f"OpenF1 returned HTTP {response.status_code} for {url}"
-        )
+
+    backoff = INITIAL_BACKOFF_SECONDS
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            if response.status_code == 429 and attempt < MAX_RETRIES:
+                wait = float(response.headers.get("Retry-After", backoff))
+                print(f"    Rate limited (429) — retrying in {wait:.0f}s "
+                      f"(attempt {attempt}/{MAX_RETRIES})")
+                time.sleep(wait)
+                backoff *= 2
+                continue
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                "Could not connect to OpenF1 API. Check your internet connection."
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError(f"Request timed out after 30 seconds: {url}")
+        except requests.exceptions.HTTPError:
+            raise RuntimeError(
+                f"OpenF1 returned HTTP {response.status_code} for {url}"
+            )
+
+    raise RuntimeError(
+        f"OpenF1 returned HTTP 429 for {url} after {MAX_RETRIES} retries."
+    )
 
 
 # ─── Meetings ────────────────────────────────────────────────────────────────
