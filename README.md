@@ -97,9 +97,46 @@ gridpulse/
 ## Getting started
 
 ### Prerequisites
-Python 3.11+, Node 18+, and a running PostgreSQL instance.
+Docker Desktop (recommended path), or Python 3.11+ / Node 18+ / a local PostgreSQL instance (manual path).
 
-### 1. Backend
+### Option A — Docker Compose (recommended)
+
+Runs Postgres, the FastAPI backend, and the frontend together in containers.
+
+```bash
+git clone <repo-url> gridpulse && cd gridpulse
+cp .env.example .env             # fill in the values (see below) — DATABASE_URL
+                                  # and FRONTEND_URL are overridden automatically
+                                  # for the containers, so you don't need to edit those two
+
+open -a Docker                   # make sure Docker Desktop is running first (macOS)
+
+docker compose up --build -d     # builds and starts db + backend + frontend
+```
+
+The Postgres container starts with an **empty** database on first run, so create the tables and seed F1 data inside the backend container once the stack is up:
+
+```bash
+docker compose exec backend python scripts/create_tables.py
+docker compose exec backend python scripts/sync_f1_data.py   # populates drivers, teams, calendar, standings
+```
+
+Then open:
+- Frontend — http://localhost:3000
+- Backend API docs — http://localhost:8000/docs
+
+Useful commands:
+
+```bash
+docker compose logs -f       # tail all service logs
+docker compose ps            # check container health/status
+docker compose down          # stop everything (keeps the Postgres volume)
+docker compose down -v       # stop and wipe the Postgres volume
+```
+
+To run one-off scripts (e.g. the [post-race-weekend sync](#automated-post-race-weekend-sync)) against the Dockerized database, run them the same way: `docker compose exec backend python scripts/<script>.py`.
+
+### Option B — Run locally without Docker
 
 ```bash
 git clone <repo-url> gridpulse && cd gridpulse
@@ -124,7 +161,7 @@ F1_SEASON=2026
 
 Google sign-in, email (Resend), and the AI assistant each need a few more variables — all documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 
-### 2. Frontend
+In a second terminal, start the frontend:
 
 ```bash
 cd frontend
@@ -134,11 +171,7 @@ npm run dev                      # http://localhost:5173
 
 Set `VITE_API_URL` to your backend URL (defaults to local).
 
-### Run with Docker
-
-```bash
-docker compose up --build        # PostgreSQL + backend + frontend
-```
+This requires a Postgres instance already running and reachable at `DATABASE_URL` — e.g. via `brew services start postgresql@14` on macOS. Note: Option A and Option B both default to Postgres port 5432, so only run one at a time.
 
 ---
 
