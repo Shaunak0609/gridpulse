@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.driver import Driver
 from app.models.race import Race
+from app.models.race_result import RaceResult
 from app.models.session import Session as RaceSession
 from app.models.standing import DriverStanding
 from app.models.team import Team
@@ -12,6 +13,7 @@ from app.services.f1_api_client import (
     fetch_constructor_standings,
     fetch_driver_standings,
     fetch_race_calendar,
+    fetch_race_results,
 )
 
 # Maps Jolpica race dict keys to (session_type, session_name).
@@ -355,16 +357,115 @@ def sync_sessions(db: Session) -> bool:
         return False
 
 
+def sync_race_results(db: Session) -> bool:
+    """
+    Sync the official classified result (position, status, points) for every
+    round of the season that has already happened. Rounds that haven't run yet
+    return an empty result list from Jolpica and are skipped, not an error.
+    """
+    print("\n[Race Results]")
+
+    races = db.query(Race).filter(Race.season == SEASON).order_by(Race.round).all()
+    if not races:
+        print("  WARNING: No races in DB for this season. Run calendar sync first.")
+        return False
+
+    inserted = 0
+    updated = 0
+    not_yet_run = 0
+
+    try:
+        for race in races:
+            try:
+                results = fetch_race_results(SEASON, race.round)
+            except RuntimeError as e:
+                print(f"  ERROR fetching results for round {race.round}: {e}")
+                continue
+
+            if not results:
+                not_yet_run += 1
+                continue
+
+            race_session = db.query(RaceSession).filter_by(
+                race_id=race.id,
+                session_type="race",
+            ).first()
+            if not race_session:
+                print(f"  WARNING: no 'race' session for round {race.round}. Run session sync first.")
+                continue
+
+            for r in results:
+                jolpica_ref = r["Driver"]["driverId"]
+                driver = db.query(Driver).filter(Driver.jolpica_ref == jolpica_ref).first()
+                if not driver:
+                    print(f"  WARNING: driver '{jolpica_ref}' not in DB — skipping result row.")
+                    continue
+
+                team = None
+                constructor = r.get("Constructor")
+                if constructor:
+                    team = db.query(Team).filter(
+                        Team.jolpica_ref == constructor["constructorId"]
+                    ).first()
+
+                position = int(r["position"]) if r.get("position") else None
+                points = float(r["points"]) if r.get("points") is not None else None
+                laps = int(r["laps"]) if r.get("laps") is not None else None
+                grid = int(r["grid"]) if r.get("grid") is not None else None
+                finish_time = r.get("Time", {}).get("time")
+
+                existing = db.query(RaceResult).filter_by(
+                    session_id=race_session.id,
+                    driver_id=driver.id,
+                ).first()
+
+                if existing:
+                    existing.position = position
+                    existing.position_text = r.get("positionText")
+                    existing.status = r.get("status")
+                    existing.grid = grid
+                    existing.points = points
+                    existing.laps = laps
+                    existing.finish_time = finish_time
+                    existing.team_id = team.id if team else existing.team_id
+                    updated += 1
+                else:
+                    db.add(RaceResult(
+                        session_id=race_session.id,
+                        driver_id=driver.id,
+                        team_id=team.id if team else None,
+                        position=position,
+                        position_text=r.get("positionText"),
+                        status=r.get("status"),
+                        grid=grid,
+                        points=points,
+                        laps=laps,
+                        finish_time=finish_time,
+                    ))
+                    inserted += 1
+
+        db.commit()
+        print(f"  OK — {inserted} inserted, {updated} updated, {not_yet_run} rounds not yet run.")
+        return True
+
+    except Exception as e:
+        db.rollback()
+        print(f"  ERROR saving race results to database: {e}")
+        return False
+
+
 def sync_all(db: Session) -> None:
     print(f"=== GridPulse F1 Data Sync — {SEASON} season ===")
 
     # Sessions must run after Race Calendar so race rows already exist.
+    # Race Results must run after Sessions so the "race"-type session exists.
     results = {
         "Teams":            sync_teams(db),
         "Drivers":          sync_drivers(db),
         "Race Calendar":    sync_race_calendar(db),
         "Sessions":         sync_sessions(db),
         "Driver Standings": sync_driver_standings(db),
+        "Race Results":     sync_race_results(db),
     }
 
     print("\n=== Sync Summary ===")

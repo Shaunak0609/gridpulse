@@ -4,9 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "groq")
-AI_API_KEY = os.getenv("AI_API_KEY", "")
-AI_MODEL = os.getenv("AI_MODEL", "llama-3.1-8b-instant")
+AI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 
 _SYSTEM_PROMPT = """\
 You are the GridPulse AI Race Assistant. Answer only using the provided GridPulse
@@ -31,8 +30,13 @@ If flagged, that data was not synced — do not guess.
 == DATA SECTIONS (synced sessions) ==
 
 LAP DATA: aggregate counts + per-driver max lap number.
-FINISHING ORDER (race/sprint): derived from lap timing — not official.
-  Always qualify as "based on synced lap data".
+OFFICIAL RACE RESULT (race sessions only, when present in context): the real
+  classified result from official F1 timing — includes position, status
+  (Finished / Disqualified / Retired / +N Lap / etc.), points, and grid position.
+  This is authoritative. Use it directly, including for penalty/DSQ questions.
+FINISHING ORDER (race/sprint, used only when no Official Race Result is present):
+  derived from lap timing — not official. Always qualify as "based on synced lap
+  data" and note that penalties/DSQs are not reflected in this derived order.
 
 ANALYTICS (pace summary):
   Session fastest lap, session average, per-driver fastest and average lap times,
@@ -86,22 +90,29 @@ How to answer alert questions:
     block. Text search of RC messages is not performed — only the structured
     driver_number column is used. If no match exists, say exactly that.
 → "Did my favourite driver retire / DNF?"
-    If a lap_comparison alert exists, quote the laps completed vs session maximum.
-    Always add: "GridPulse does not store official retirement or classification data."
-    Never speculate on the cause — only state what the lap count shows.
+    First check the session's Official Race Result block (if present) for a
+    non-"Finished" status — that's authoritative. Only if that block is absent
+    for this session, fall back to a lap_comparison alert if one exists (quote
+    laps completed vs session maximum) and add: "GridPulse's lap-derived data
+    does not confirm the official retirement reason." Never speculate on cause.
 → If no alert of the relevant type exists: name exactly which data is missing and
     why GridPulse cannot answer (e.g. "no stint data synced for this session").
 
 == WHAT GRIDPULSE DOES NOT HAVE ==
 
-No official classifications, qualifying results, grid positions, pole lap times,
+No qualifying results, grid positions for quali/practice sessions, pole lap times,
 full per-lap time sequences, official pit stop durations, live timing, or telemetry.
 Stop counts and pit windows are derived — not from official timing data.
-Points totals do NOT tell you who won — check the finishing order.
 Per-lap position history — cannot confirm position gains or losses during a race.
-Official retirement or DNF data — only lap-count comparison is available.
 Penalty confirmation via free-text — only the structured driver_number RC column
   is reliable; RC text mentions are not searched.
+
+Official RACE classifications (position, DSQ/retirement status, points) ARE
+available, but only for race sessions where an "Official Race Result" block
+appears in context — this depends on whether that round has been synced. If it's
+absent for a session, fall back to the lap-derived finishing order and its caveats
+above. Do not claim official-result data exists for a session unless the block is
+actually present.
 
 == CRITICAL RULES ==
 
@@ -113,21 +124,26 @@ Penalty confirmation via free-text — only the structured driver_number RC colu
 """
 
 
-def _call_groq(full_prompt: str) -> tuple[str, int]:
-    from groq import APIError, AuthenticationError, Groq, RateLimitError
+def _call_openai(full_prompt: str) -> tuple[str, int]:
+    from openai import APIError, AuthenticationError, OpenAI, RateLimitError
 
-    client = Groq(api_key=AI_API_KEY)
+    client = OpenAI(api_key=AI_API_KEY)
     try:
         completion = client.chat.completions.create(
             model=AI_MODEL,
-            max_tokens=1024,
+            # gpt-5.6-luna (and the wider GPT-5 family) rejects "max_tokens" —
+            # use "max_completion_tokens" instead. No "temperature" override:
+            # some GPT-5-tier models restrict it to the default, so we don't
+            # pass one, matching the previous Groq/Anthropic calls which also
+            # never set it.
+            max_completion_tokens=1024,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": full_prompt},
             ],
         )
     except AuthenticationError:
-        return "The AI API key is invalid or expired. Check AI_API_KEY in your .env file.", 0
+        return "The AI API key is invalid or expired. Check OPENAI_API_KEY in your .env file.", 0
     except RateLimitError:
         return "The AI API rate limit was reached. Please wait a moment and try again.", 0
     except APIError as e:
@@ -138,56 +154,19 @@ def _call_groq(full_prompt: str) -> tuple[str, int]:
     return response_text, tokens_used
 
 
-def _call_anthropic(full_prompt: str) -> tuple[str, int]:
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=AI_API_KEY)
-    try:
-        message = client.messages.create(
-            model=AI_MODEL,
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": full_prompt}],
-        )
-    except anthropic.AuthenticationError:
-        return "The AI API key is invalid or expired. Check AI_API_KEY in your .env file.", 0
-    except anthropic.RateLimitError:
-        return "The AI API rate limit was reached. Please wait a moment and try again.", 0
-    except anthropic.APIError as e:
-        msg = str(e)
-        if "credit balance" in msg.lower():
-            return "The AI API account has no credits. Add credits at console.anthropic.com to enable the Race Assistant.", 0
-        return f"The AI service returned an error: {e}", 0
-
-    response_text = message.content[0].text
-    tokens_used = message.usage.input_tokens + message.usage.output_tokens
-    return response_text, tokens_used
-
-
-_PROVIDERS: dict[str, object] = {
-    "groq": _call_groq,
-    "anthropic": _call_anthropic,
-}
-
-
 def generate_ai_response(prompt: str, context: str) -> tuple[str, int]:
     """
-    Send a user prompt to the configured AI provider, grounded in the supplied
-    context string built from the GridPulse database.
+    Send a user prompt to OpenAI, grounded in the supplied context string
+    built from the GridPulse database.
 
     Returns (response_text, total_tokens_used).
     Never raises — errors are returned as readable messages with 0 tokens.
     """
     if not AI_API_KEY:
         return (
-            "AI_API_KEY is not configured. Add it to your .env file to enable "
+            "OPENAI_API_KEY is not configured. Add it to your .env file to enable "
             "the AI Race Assistant. See .env.example for instructions."
         ), 0
 
-    caller = _PROVIDERS.get(AI_PROVIDER)
-    if caller is None:
-        supported = ", ".join(_PROVIDERS)
-        return f"Unknown AI_PROVIDER '{AI_PROVIDER}'. Supported: {supported}.", 0
-
     full_prompt = f"CONTEXT:\n{context}\n\nQUESTION:\n{prompt}"
-    return caller(full_prompt)  # type: ignore[operator]
+    return _call_openai(full_prompt)

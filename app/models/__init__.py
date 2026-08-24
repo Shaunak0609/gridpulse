@@ -13,3 +13,4 @@ from app.models.lap import Lap
 from app.models.stint import Stint
 from app.models.race_control_message import RaceControlMessage
 from app.models.weather_sample import WeatherSample
+from app.models.race_result import RaceResult

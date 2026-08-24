@@ -9,6 +9,7 @@ from app.models.favorite_driver import FavoriteDriver
 from app.models.favorite_team import FavoriteTeam
 from app.models.lap import Lap
 from app.models.notification import Notification
+from app.models.race_result import RaceResult
 from app.models.reminder import Reminder
 from app.models.session import Session as RaceSession
 from app.models.standing import DriverStanding
@@ -19,23 +20,23 @@ from app.services.strategy_dashboard import build_strategy_summary
 
 SEASON = int(os.getenv("F1_SEASON", "2026"))
 
-# Context budget caps — keep total prompt tokens well under the Groq free-tier
-# TPM limit for llama-3.1-8b-instant (6 000 TPM).
+# Context caps. These used to be tight enough to fit Groq's free-tier 6 000 TPM
+# limit (llama-3.1-8b-instant); now that generation runs on OpenAI (much larger
+# context window, low per-token cost), historical session coverage is
+# unbounded — every synced session is included, not just the last few — and
+# the remaining per-section caps below just match the service-level caps used
+# by the dashboard endpoints (a full F1 grid is 20-22 drivers).
 _MAX_STANDINGS = 10
 _MAX_SESSIONS = 5
 _MAX_REMINDERS = 3
 _MAX_NOTIFICATIONS = 3
 _MAX_DRIVER_ALERTS = 5      # favourite-driver alert entries to include
-_MAX_SYNCED_SESSIONS = 2    # most-recent synced sessions to describe
 
-# AI-specific caps — tighter than the service-level caps to protect the
-# Groq free-tier 6 000 TPM limit. The session dashboard endpoint uses
-# higher caps because it doesn't need to fit inside a single prompt.
-_AI_MAX_RC = 15             # RC messages per session (service cap is 40)
-_AI_MAX_DRIVER_LAPS = 10    # per-driver lap rows for qualifying/FP sessions
-_AI_MAX_STRATEGY_DRIVERS = 20  # per-driver strategy rows in AI context
+_AI_MAX_RC = 40             # RC messages per session (matches service cap)
+_AI_MAX_DRIVER_LAPS = 22    # per-driver lap rows for qualifying/FP sessions
+_AI_MAX_STRATEGY_DRIVERS = 22  # per-driver strategy rows in AI context
 _AI_MAX_INSIGHTS = 4            # rule-based insight sentences to include
-_AI_MAX_ANALYTICS_DRIVERS = 20 # per-driver pace rows in analytics context
+_AI_MAX_ANALYTICS_DRIVERS = 22 # per-driver pace rows in analytics context
 
 # Human-readable label and data source for each favourite-driver alert type.
 _ALERT_TYPE_META: dict[str, tuple[str, str]] = {
@@ -264,8 +265,34 @@ def _session_block(session: RaceSession, db: Session, user: User) -> list[str]:
     else:
         lines.append("  Laps    : GridPulse does not have synced lap data for this session.")
 
-    # ── Finishing order (race / sprint only) ──────────────────────────────────
-    if summary.finishing_order:
+    # ── Official race result (race sessions only, when synced) ────────────────
+    # Authoritative — sourced from Jolpica's official classification, so it
+    # reflects penalties/DSQs that the lap-derived finishing order below
+    # cannot. When present, this replaces the derived block entirely to avoid
+    # showing two possibly-conflicting finishing orders for the same session.
+    official_results = []
+    if summary.session_type == "race":
+        official_results = (
+            db.query(RaceResult)
+            .filter(RaceResult.session_id == session.id)
+            .order_by(RaceResult.position.is_(None), RaceResult.position)
+            .all()
+        )
+
+    if official_results:
+        lines.append("  Official Race Result (authoritative — reflects penalties/DSQs):")
+        for rr in official_results:
+            driver_name = rr.driver.full_name if rr.driver else "Unknown driver"
+            team_name = f", {rr.team.name}" if rr.team else ""
+            pos = f"P{rr.position}" if rr.position is not None else rr.position_text or "?"
+            status_flag = f"  [{rr.status}]" if rr.status and rr.status != "Finished" else ""
+            points_str = f", {rr.points:g} pts" if rr.points is not None else ""
+            lines.append(
+                f"    {pos}. {driver_name} (#{rr.driver.driver_number if rr.driver else '?'}"
+                f"{team_name}){status_flag}{points_str}"
+            )
+    # ── Finishing order (race / sprint only) — fallback when no official result ──
+    elif summary.finishing_order:
         lines.append("  Finishing order (derived from lap data — not official results):")
         lines.append("    (max_lap = highest lap number recorded; rows = total lap rows)")
         for e in summary.finishing_order:
@@ -553,11 +580,14 @@ def build_context(user: User, db: Session) -> str:
     sections.append(_section("Driver Number Reference (for decoding RC messages)", ref_lines))
 
     # ── Historical session data ───────────────────────────────────────────────
+    # Every synced session is included — no recency cap. OpenAI's larger
+    # context window and low per-token cost make the old "last 2 sessions"
+    # limit unnecessary, and it was the main reason the assistant couldn't
+    # answer questions about anything but the most recent race weekend.
     synced_sessions = (
         db.query(RaceSession)
         .filter(RaceSession.openf1_session_key.isnot(None))
         .order_by(RaceSession.start_time.desc())
-        .limit(_MAX_SYNCED_SESSIONS)
         .all()
     )
 
@@ -569,7 +599,7 @@ def build_context(user: User, db: Session) -> str:
                 hist_lines.append("")
         title = (
             f"Historical Session Data "
-            f"(last {len(synced_sessions)} synced, most recent first)"
+            f"(all {len(synced_sessions)} synced, most recent first)"
         )
         sections.append(_section(title, hist_lines))
     else:
@@ -580,14 +610,17 @@ def build_context(user: User, db: Session) -> str:
 
     # ── Explicit data limitations ─────────────────────────────────────────────
     sections.append(_section("Data NOT Available in GridPulse", [
-        "  - Official race classifications (finishing positions above are derived",
-        "    from lap timing — post-race penalties/DSQs are not reflected)",
-        "  - Qualifying results, grid positions, or pole lap times",
+        "  - Qualifying results, grid positions for quali/practice, or pole lap times",
         "  - Full per-lap time sequences (only fastest, average, and sector best",
         "    times are available per driver via the Analytics section above)",
         "  - Pit stop durations or exact pit timing",
         "  - Live race timing or telemetry of any kind",
         "  - Car telemetry (speed traces, throttle, brake, GPS position)",
+        "  Note: Official race classifications (with penalties/DSQs reflected) ARE",
+        "        available for race sessions where an 'Official Race Result' block",
+        "        appears above — sourced from Jolpica. If that block is absent for a",
+        "        given race session, only the lap-derived finishing order exists,",
+        "        which does NOT reflect post-race penalties or DSQs.",
         "  Note: Lap times, tyre strategies, weather, and RC messages are stored",
         "        only for sessions synced via the OpenF1 sync script.",
     ]))

@@ -41,3 +41,14 @@ def fetch_constructor_standings(season: int = SEASON) -> list[dict]:
     if not standings_lists:
         return []
     return standings_lists[0]["ConstructorStandings"]
+
+
+def fetch_race_results(season: int, round_num: int) -> list[dict]:
+    """
+    Return the official classified result for one round, or [] if the race
+    hasn't happened yet (Jolpica returns an empty Races list in that case).
+    """
+    url = f"{BASE_URL}/{season}/{round_num}/results.json"
+    data = _get(url)
+    races = data["MRData"]["RaceTable"]["Races"]
+    return races[0]["Results"] if races else []
