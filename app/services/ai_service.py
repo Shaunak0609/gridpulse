@@ -125,6 +125,8 @@ actually present.
 
 
 def _call_openai(full_prompt: str) -> tuple[str, int]:
+    import traceback
+
     from openai import APIError, AuthenticationError, OpenAI, RateLimitError
 
     client = OpenAI(api_key=AI_API_KEY)
@@ -147,6 +149,13 @@ def _call_openai(full_prompt: str) -> tuple[str, int]:
     except RateLimitError:
         return "The AI API rate limit was reached. Please wait a moment and try again.", 0
     except APIError as e:
+        # TEMPORARY diagnostic logging — remove once the root cause of the
+        # persistent "Connection error." on Render is confirmed. e's own
+        # message is often just the generic wrapper text; the real cause
+        # (DNS, TLS, timeout, edge rejection, etc.) is usually on __cause__.
+        print(f"AI request failed: {type(e).__name__}: {e}")
+        print(f"  underlying cause: {type(e.__cause__).__name__ if e.__cause__ else None}: {e.__cause__}")
+        traceback.print_exc()
         return f"The AI service returned an error: {e}", 0
 
     response_text = completion.choices[0].message.content or ""
