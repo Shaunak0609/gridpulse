@@ -26,7 +26,7 @@ export default function GoogleCallback() {
         if (!fetchedUser.username) {
           navigate('/settings?setup=1')
         } else {
-          navigate('/')
+          navigate('/calendar')
         }
       })
       .catch(() =>

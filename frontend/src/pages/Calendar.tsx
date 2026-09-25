@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getCalendar, getReminders, createReminder, getRaceSessions } from '../services/api'
+import {
+  getCalendar, getReminders, createReminder, getRaceSessions,
+  getFavoriteDrivers, getFavoriteTeams,
+} from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import type { Race, Session } from '../types'
 
@@ -52,6 +55,12 @@ const SESSION_COLORS: Record<string, string> = {
   sprint:           'bg-orange-500',
   qualifying:       'bg-yellow-500',
   race:             'bg-red-600',
+}
+
+const PODIUM_STYLE: Record<number, string> = {
+  1: 'text-yellow-400',
+  2: 'text-gray-300',
+  3: 'text-amber-600',
 }
 
 // ─── SessionPanel ────────────────────────────────────────────────────────────
@@ -145,7 +154,7 @@ function SessionPanel({
           return (
             <div
               key={session.id}
-              className={`flex items-center gap-3 py-1.5 ${past ? 'opacity-40' : ''}`}
+              className="flex items-center gap-3 py-1.5"
             >
               {/* Session type dot */}
               <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotColor}`} />
@@ -154,7 +163,7 @@ function SessionPanel({
               {past ? (
                 <Link
                   to={`/sessions/${session.id}`}
-                  className="text-xs font-medium w-28 shrink-0 text-gray-500 hover:text-gray-300 transition-colors underline-offset-2 hover:underline"
+                  className="text-xs font-medium w-28 shrink-0 text-gray-300 hover:text-white transition-colors underline-offset-2 hover:underline"
                 >
                   {session.session_name}
                 </Link>
@@ -164,8 +173,8 @@ function SessionPanel({
                 </span>
               )}
 
-              {/* Time */}
-              <span className="text-xs text-gray-600 font-mono flex-1">
+              {/* Time — converted to the viewer's local timezone automatically */}
+              <span className="text-xs text-gray-400 font-mono flex-1">
                 {formatSessionTime(session.start_time)}
               </span>
 
@@ -200,19 +209,19 @@ function SessionPanel({
                 <div className="shrink-0 w-32 text-right space-y-0.5">
                   <Link
                     to={`/sessions/${session.id}/dashboard`}
-                    className="block text-xs text-gray-500 hover:text-red-400 transition-colors"
+                    className="block text-xs text-gray-400 hover:text-red-400 transition-colors"
                   >
                     Dashboard →
                   </Link>
                   <Link
                     to={`/sessions/${session.id}/strategy`}
-                    className="block text-xs text-gray-500 hover:text-orange-400 transition-colors"
+                    className="block text-xs text-gray-400 hover:text-orange-400 transition-colors"
                   >
                     Strategy →
                   </Link>
                   <Link
                     to={`/sessions/${session.id}/analytics`}
-                    className="block text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                    className="block text-xs text-gray-400 hover:text-purple-400 transition-colors"
                   >
                     Analytics →
                   </Link>
@@ -228,6 +237,61 @@ function SessionPanel({
   )
 }
 
+// ─── ResultTeaser ─────────────────────────────────────────────────────────────
+// Quick podium + fastest-lap strip shown directly on a past race's collapsed
+// card, so viewers don't have to expand/click through to see who won.
+
+function ResultTeaser({
+  race,
+  favoriteDriverNames,
+  favoriteTeamNames,
+  highlightFavorites,
+}: {
+  race: Race
+  favoriteDriverNames: Set<string>
+  favoriteTeamNames: Set<string>
+  highlightFavorites: boolean
+}) {
+  const teaser = race.teaser
+  if (!teaser || (teaser.podium.length === 0 && !teaser.fastest_lap_driver)) return null
+
+  function isFavorite(driverName: string, teamName: string | null): boolean {
+    if (!highlightFavorites) return false
+    return favoriteDriverNames.has(driverName) || (teamName !== null && favoriteTeamNames.has(teamName))
+  }
+
+  return (
+    <div className="px-5 pb-3 -mt-1 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+      {teaser.podium.map(entry => (
+        <span
+          key={entry.position}
+          className={`text-xs flex items-center gap-1.5 ${
+            isFavorite(entry.driver_name, entry.team_name) ? 'text-red-400 font-semibold' : 'text-gray-500'
+          }`}
+        >
+          <span className={`font-bold ${PODIUM_STYLE[entry.position] ?? 'text-gray-600'}`}>
+            P{entry.position}
+          </span>
+          {entry.driver_name}
+        </span>
+      ))}
+      {teaser.fastest_lap_driver && (
+        <span
+          className={`text-xs flex items-center gap-1.5 ${
+            isFavorite(teaser.fastest_lap_driver, null) ? 'text-red-400 font-semibold' : 'text-gray-600'
+          }`}
+        >
+          <span className="text-purple-400 font-bold">FL</span>
+          {teaser.fastest_lap_driver}
+          {teaser.fastest_lap_time && (
+            <span className="text-gray-700 font-mono">{teaser.fastest_lap_time.toFixed(3)}s</span>
+          )}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ─── RaceRow ──────────────────────────────────────────────────────────────────
 
 type ReminderStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -237,11 +301,17 @@ function RaceRow({
   allRaces,
   hasReminder,
   remindedSessionIds,
+  favoriteDriverNames,
+  favoriteTeamNames,
+  highlightFavorites,
 }: {
   race: Race
   allRaces: Race[]
   hasReminder: boolean
   remindedSessionIds: Set<number>
+  favoriteDriverNames: Set<string>
+  favoriteTeamNames: Set<string>
+  highlightFavorites: boolean
 }) {
   const { isAuthenticated, token } = useAuth()
   const past = isPast(race.start_date)
@@ -249,6 +319,10 @@ function RaceRow({
   const [reminderStatus, setReminderStatus] = useState<ReminderStatus>(hasReminder ? 'success' : 'idle')
   const [reminderError, setReminderError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+
+  function toggleExpanded() {
+    setExpanded(prev => !prev)
+  }
 
   async function handleAddReminder() {
     if (!token) return
@@ -266,10 +340,23 @@ function RaceRow({
     }
   }
 
+  // Season-progress accent — a clear signal beyond just dimming, per race status.
+  const accentClass = next
+    ? 'border-l-2 border-red-500 bg-red-950/10'
+    : past
+      ? 'border-l-2 border-emerald-800/60'
+      : 'border-l-2 border-transparent'
+
   return (
-    <div className={`border-b border-gray-800 last:border-0 ${past ? '' : 'hover:bg-gray-800/30'} transition-colors duration-150`}>
-      {/* Race header row */}
-      <div className={`flex items-center gap-4 px-5 py-4 ${past ? 'opacity-40' : ''}`}>
+    <div className={`border-b border-gray-800 last:border-0 ${accentClass}`}>
+      {/* Race header row — click anywhere in it to expand the session timeline */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={toggleExpanded}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpanded() } }}
+        className={`flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-800/30 transition-colors duration-150 ${past ? 'opacity-70' : ''}`}
+      >
         {/* Round badge */}
         <span className="text-gray-600 text-xs font-mono w-7 shrink-0 text-right">
           R{race.round}
@@ -277,9 +364,19 @@ function RaceRow({
 
         {/* Race info */}
         <div className="flex-1 min-w-0">
-          <p className={`font-semibold text-sm truncate ${past ? 'text-gray-400' : 'text-white'}`}>
-            {race.name}
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className={`font-semibold text-sm truncate ${past ? 'text-gray-400' : 'text-white'}`}>
+              {race.name}
+            </p>
+            {race.is_sprint_weekend && (
+              <span className="text-[10px] uppercase tracking-wide font-semibold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded">
+                Sprint
+              </span>
+            )}
+            <span className="text-[10px] uppercase tracking-wide text-gray-600 border border-gray-800 px-1.5 py-0.5 rounded">
+              {race.circuit_type}
+            </span>
+          </div>
           <p className="text-gray-600 text-xs truncate mt-0.5">{race.circuit_name ?? race.country ?? '—'}</p>
         </div>
 
@@ -290,14 +387,17 @@ function RaceRow({
               Next Race
             </span>
           )}
+          {past && !next && (
+            <span className="text-xs text-emerald-700 font-medium block mb-1">Completed</span>
+          )}
           <p className={`text-xs font-mono ${past ? 'text-gray-600' : 'text-gray-400'}`}>
             {formatDate(race.start_date)}
           </p>
         </div>
 
-        {/* Race-level reminder */}
+        {/* Race-level reminder — stopPropagation so clicking it doesn't also toggle the row */}
         {!past && race.start_date ? (
-          <div className="shrink-0 w-28 text-right">
+          <div className="shrink-0 w-28 text-right" onClick={e => e.stopPropagation()}>
             {!isAuthenticated ? (
               <Link to="/login" className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
                 Log in to remind
@@ -320,12 +420,8 @@ function RaceRow({
           <div className="shrink-0 w-28" />
         )}
 
-        {/* Expand toggle */}
-        <button
-          onClick={() => setExpanded(prev => !prev)}
-          className="shrink-0 text-gray-700 hover:text-gray-400 transition-colors p-1 rounded"
-          aria-label={expanded ? 'Hide sessions' : 'Show sessions'}
-        >
+        {/* Expand indicator — purely visual now; the whole row above already toggles */}
+        <span className="shrink-0 text-gray-700 p-1" aria-hidden="true">
           <svg
             className={`w-3.5 h-3.5 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
             fill="none" stroke="currentColor" strokeWidth={2.5}
@@ -333,8 +429,18 @@ function RaceRow({
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
+        </span>
       </div>
+
+      {/* Result teaser — past races, shown while collapsed */}
+      {past && !expanded && (
+        <ResultTeaser
+          race={race}
+          favoriteDriverNames={favoriteDriverNames}
+          favoriteTeamNames={favoriteTeamNames}
+          highlightFavorites={highlightFavorites}
+        />
+      )}
 
       {/* Session panel — lazy rendered when expanded */}
       {expanded && (
@@ -365,15 +471,39 @@ function SkeletonRow() {
   )
 }
 
+// ─── Filters ──────────────────────────────────────────────────────────────────
+
+type CircuitFilter = 'all' | 'street' | 'permanent'
+type FormatFilter = 'all' | 'sprint' | 'standard'
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs px-3 py-1.5 rounded-lg transition-colors duration-150 ${
+        active ? 'bg-red-600 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Calendar() {
-  const { token } = useAuth()
+  const { token, isAuthenticated } = useAuth()
   const [races, setRaces] = useState<Race[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [remindedRaceIds, setRemindedRaceIds] = useState<Set<number>>(new Set())
   const [remindedSessionIds, setRemindedSessionIds] = useState<Set<number>>(new Set())
+
+  const [circuitFilter, setCircuitFilter] = useState<CircuitFilter>('all')
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>('all')
+  const [highlightFavorites, setHighlightFavorites] = useState(true)
+  const [favoriteDriverNames, setFavoriteDriverNames] = useState<Set<string>>(new Set())
+  const [favoriteTeamNames, setFavoriteTeamNames] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     getCalendar()
@@ -403,11 +533,77 @@ export default function Calendar() {
       .catch(() => {})
   }, [token])
 
+  useEffect(() => {
+    if (!token) return
+    Promise.all([getFavoriteDrivers(token), getFavoriteTeams(token)])
+      .then(([drivers, teams]) => {
+        setFavoriteDriverNames(new Set(drivers.map(d => d.driver.full_name)))
+        setFavoriteTeamNames(new Set(teams.map(t => t.team.name)))
+      })
+      .catch(() => {})
+  }, [token])
+
+  const filteredRaces = useMemo(() => {
+    if (!races) return null
+    return races.filter(r => {
+      if (circuitFilter !== 'all' && r.circuit_type !== circuitFilter) return false
+      if (formatFilter === 'sprint' && !r.is_sprint_weekend) return false
+      if (formatFilter === 'standard' && r.is_sprint_weekend) return false
+      return true
+    })
+  }, [races, circuitFilter, formatFilter])
+
+  const completedCount = races?.filter(r => isPast(r.start_date)).length ?? 0
+  const totalCount = races?.length ?? 0
+  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+  const hasFavorites = favoriteDriverNames.size > 0 || favoriteTeamNames.size > 0
+
   return (
     <div className="page-enter">
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-3xl font-bold text-white">Race Calendar</h1>
         <p className="text-gray-400 mt-1">The full 2026 Formula 1 season schedule.</p>
+      </div>
+
+      {/* Season progress */}
+      {totalCount > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+            <span>{completedCount} of {totalCount} races completed</span>
+            <span>{progressPct}%</span>
+          </div>
+          <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-red-600 rounded-full transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-xs text-gray-600 mr-1">Circuit:</span>
+        <FilterButton active={circuitFilter === 'all'} onClick={() => setCircuitFilter('all')}>All</FilterButton>
+        <FilterButton active={circuitFilter === 'street'} onClick={() => setCircuitFilter('street')}>Street</FilterButton>
+        <FilterButton active={circuitFilter === 'permanent'} onClick={() => setCircuitFilter('permanent')}>Permanent</FilterButton>
+
+        <span className="text-xs text-gray-600 ml-3 mr-1">Weekend:</span>
+        <FilterButton active={formatFilter === 'all'} onClick={() => setFormatFilter('all')}>All</FilterButton>
+        <FilterButton active={formatFilter === 'sprint'} onClick={() => setFormatFilter('sprint')}>Sprint</FilterButton>
+        <FilterButton active={formatFilter === 'standard'} onClick={() => setFormatFilter('standard')}>Standard</FilterButton>
+
+        {isAuthenticated && hasFavorites && (
+          <label className="flex items-center gap-1.5 text-xs text-gray-400 ml-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={highlightFavorites}
+              onChange={e => setHighlightFavorites(e.target.checked)}
+              className="accent-red-600"
+            />
+            Highlight my favourites
+          </label>
+        )}
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -421,13 +617,22 @@ export default function Calendar() {
           </div>
         )}
 
-        {races && races.map(race => (
+        {filteredRaces && filteredRaces.length === 0 && !loading && (
+          <div className="p-8 text-center">
+            <p className="text-gray-400 font-medium">No races match these filters.</p>
+          </div>
+        )}
+
+        {filteredRaces && races && filteredRaces.map(race => (
           <RaceRow
             key={race.id}
             race={race}
             allRaces={races}
             hasReminder={remindedRaceIds.has(race.id)}
             remindedSessionIds={remindedSessionIds}
+            favoriteDriverNames={favoriteDriverNames}
+            favoriteTeamNames={favoriteTeamNames}
+            highlightFavorites={highlightFavorites}
           />
         ))}
       </div>

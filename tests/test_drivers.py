@@ -1,9 +1,10 @@
 """
 Tests for GET /drivers and GET /drivers/{id}.
 
-The test database starts empty — no drivers are seeded.
-GET /drivers returns an empty list, which is a valid 200 response.
-GET /drivers/{id} with any ID returns 404 because the table is empty.
+Other test files in this suite seed a handful of Driver rows into the shared
+session-scoped SQLite DB (see conftest.py), so "the DB is empty" no longer
+holds by the time this file runs — the 404 tests use a high ID that's
+guaranteed never to collide with those, rather than assuming emptiness.
 """
 
 
@@ -18,8 +19,7 @@ def test_get_drivers_returns_a_list(client):
 
 
 def test_get_driver_not_found_returns_404(client):
-    # No drivers in the test database, so any ID should be 404.
-    response = client.get("/drivers/1")
+    response = client.get("/drivers/999999")
     assert response.status_code == 404
 
 

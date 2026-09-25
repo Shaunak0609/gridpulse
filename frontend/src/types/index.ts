@@ -14,6 +14,18 @@ export interface Team {
   base: string | null
 }
 
+export interface PodiumEntry {
+  position: number
+  driver_name: string
+  team_name: string | null
+}
+
+export interface RaceTeaser {
+  podium: PodiumEntry[]
+  fastest_lap_driver: string | null
+  fastest_lap_time: number | null
+}
+
 export interface Race {
   id: number
   season: number
@@ -22,6 +34,9 @@ export interface Race {
   circuit_name: string | null
   country: string | null
   start_date: string | null
+  is_sprint_weekend: boolean
+  circuit_type: 'street' | 'permanent'
+  teaser: RaceTeaser | null
 }
 
 export interface DriverStanding {

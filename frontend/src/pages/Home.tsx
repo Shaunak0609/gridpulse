@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom'
 
 const sections = [
+  { to: '/calendar', label: 'Calendar', description: 'The full 22-race 2026 season schedule — race weekends, results, and live updates.' },
   { to: '/drivers', label: 'Drivers', description: 'All 22 drivers on the 2026 grid.' },
   { to: '/teams', label: 'Teams', description: 'All 11 constructors competing in 2026.' },
-  { to: '/calendar', label: 'Calendar', description: 'The full 22-race 2026 season schedule.' },
   { to: '/standings', label: 'Standings', description: 'Live driver championship standings.' },
 ]
 
@@ -31,10 +31,10 @@ export default function Home() {
           Your Formula 1 race intelligence platform. Follow drivers, teams, the calendar, and championship standings.
         </p>
         <Link
-          to="/standings"
+          to="/calendar"
           className="relative z-10 inline-block mt-8 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold px-6 py-3 rounded-lg transition-colors duration-200"
         >
-          View Standings →
+          View the Calendar →
         </Link>
       </div>
 

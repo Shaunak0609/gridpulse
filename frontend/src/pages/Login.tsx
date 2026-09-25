@@ -17,7 +17,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false)
 
   if (authLoading) return null
-  if (isAuthenticated) return <Navigate to="/" replace />
+  if (isAuthenticated) return <Navigate to="/calendar" replace />
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -26,7 +26,7 @@ export default function Login() {
 
     try {
       await login({ email, password })
-      navigate('/')
+      navigate('/calendar')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.')
     } finally {

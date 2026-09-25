@@ -28,7 +28,7 @@ export default function Signup() {
   const [submitting, setSubmitting] = useState(false)
 
   if (authLoading) return null
-  if (isAuthenticated) return <Navigate to="/" replace />
+  if (isAuthenticated) return <Navigate to="/calendar" replace />
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -38,7 +38,7 @@ export default function Signup() {
     try {
       await signup({ email, password, username: username || undefined, timezone })
       await login({ email, password })
-      navigate('/')
+      navigate('/calendar')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed.')
     } finally {
